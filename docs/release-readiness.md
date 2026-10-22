@@ -255,3 +255,32 @@ seconds while creating its SQLite databases under slow Windows file I/O. What
 slows file creation on the runner (for example real-time antivirus scanning of
 new database and journal files, or disk throughput) is **not yet identified**.
 Merge and publication remain blocked.
+
+#### Defender A/B — hypothesis rejected
+
+Commit `8c7a753` added a `defender_exclusion` input that records Defender state
+and can add the runner temp folder (long and 8.3 forms) as a scan exclusion.
+Both runs used Codex 0.152.0. Every worker reported
+`RealTimeProtectionEnabled=false`, `OnAccessProtectionEnabled=false` and existing
+exclusions `C:\;D:\` **before** any change, so on-access scanning was not active
+on these runners and the added exclusion was redundant.
+
+| Exclusion | Run | Four-fixture pressure worker | Sequential + shared/separate worker |
+| --- | --- | --- | --- |
+| No | [39828859593](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39828859593) | **Failed:** 432 inits, max 2.9 s, 24 over 2 s; then a native state-runtime initialization error after 1.1 s | Passed: 205 inits, max 4.3 s, 16 over 2 s |
+| Yes | [39828875341](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39828875341) | Passed: 900 inits (all 25 batches), max 7.6 s, 4 over 5 s, 38 over 2 s | Canceled by the 15-minute job limit after 205 inits, max 8.1 s, 11 over 5 s |
+
+The exclusion did not reduce slow cold starts; variance between runners exceeds
+any difference between the two settings. Real-time antivirus scanning is therefore
+**not** the cause of the slow SQLite creation on GitHub-hosted Windows runners.
+
+The fast native error (`failed to initialize state runtime`, no inner cause
+printed) now appeared on both 0.152.0 and 0.163.0. In this run it was the ninth
+process of one fixture, against an already initialized home, so it is not a
+first-creation race. The fixture stops a runtime and starts the next one without
+waiting for the old process to exit; overlap with an exiting process on the same
+home is a candidate, not a verified cause.
+
+Remaining candidates for the slow path are disk throughput or flush latency of
+the temp volume (`C:`, the OS disk) during SQLite creation and migration, and
+host contention. Merge and publication remain blocked.

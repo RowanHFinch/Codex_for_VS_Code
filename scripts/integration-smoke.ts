@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
-import { mkdtemp, mkdir, realpath, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, writeFile, readFile, readdir, stat, rm } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
-import { JsonLines, RuntimeClient } from '../src/runtime/client';
+import { DeliveryError, JsonLines, RuntimeClient } from '../src/runtime/client';
 import { connect, sharedConnection } from '../src/runtime/compatibility';
 import { Integrations, mcpFingerprint } from '../src/integrations';
 
@@ -64,7 +64,16 @@ async function main() {
       });
       const snapshot = async () => {
         trace('slow-startup', pipeState());
-        trace('home-files', await readdir(context.home).catch(() => []));
+        const files = await readdir(context.home).catch(() => []);
+        trace(
+          'home-files',
+          await Promise.all(
+            files.map(async name => {
+              const info = await stat(join(context.home, name)).catch(() => undefined);
+              return { name, size: info?.size, modified: info?.mtime.toISOString() };
+            }),
+          ),
+        );
         if (process.platform !== 'win32' || !child.pid) return;
         try {
           const { stdout } = await promisify(execFile)(
@@ -120,6 +129,12 @@ async function main() {
           return result;
         } catch (error) {
           trace('request-failed', { method, durationMs: Date.now() - at, ...pipeState(), frames, stderr });
+          if (method === 'initialize' && error instanceof DeliveryError && error.message.includes('Timed out')) {
+            await snapshot();
+            // Keep the failed request failed; observe a late native error without resending it.
+            await new Promise(resolve => setTimeout(resolve, 10000));
+            trace('after-deadline', { ...pipeState(), frames, stderr });
+          }
           throw error;
         } finally {
           clearTimeout(slow);
@@ -179,6 +194,7 @@ async function main() {
     const executable = process.env.CODEX_RUNTIME_PATH || 'codex';
     if (process.env.CODEX_STARTUP_CONCURRENT === '1') {
       // Several editor surfaces can connect to the same native home at once.
+      let failed = 0;
       for (const shared of [false, true]) {
         const roots: string[] = [];
         for (let i = 0; i < 8; i++) {
@@ -199,9 +215,10 @@ async function main() {
             JSON.stringify({ scenario: label, passed: connections.length - failures.length, failed: failures.length }),
           );
           for (const c of connections) if (c.status === 'fulfilled') await c.value.client.shutdown();
-          assert.equal(failures.length, 0, `${label} initialization must succeed without retries`);
+          failed += failures.length;
         }
       }
+      assert.equal(failed, 0, 'all cold/warm startup cases must succeed without retries');
     }
     // The production writer: one configuration runtime shared by each write and its readback.
     const control = sharedConnection(() => connect(executable, root, {}, true));

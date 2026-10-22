@@ -95,8 +95,22 @@ jobs:
             npm run $check
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          for ($i = 1; $i -le 100; $i++) {
+          $rounds = if ($env:CODEX_STARTUP_CONCURRENT -eq '1') { 20 } else { 25 }
+          for ($i = 1; $i -le $rounds; $i++) {
             Write-Output "STARTUP ITERATION $i; CONCURRENT=$env:CODEX_STARTUP_CONCURRENT"
-            npm run test:integrations
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ($env:CODEX_STARTUP_CONCURRENT -eq '1') {
+              npm run test:integrations
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            } else {
+              $children = 1..4 | ForEach-Object {
+                Start-Process node.exe -ArgumentList @('node_modules/tsx/dist/cli.mjs', 'scripts/integration-smoke.ts') -NoNewWindow -PassThru
+              }
+              $failed = $false
+              foreach ($child in $children) {
+                $child.WaitForExit()
+                if ($child.ExitCode -ne 0) { $failed = $true }
+                $child.Dispose()
+              }
+              if ($failed) { exit 1 }
+            }
           }

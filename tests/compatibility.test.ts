@@ -21,7 +21,7 @@ test('missing runtime fails clearly before login or inference', async () => {
   await assert.rejects(runtimeVersion('/nonexistent/independent-codex-runtime'), /Codex not found/);
   await assert.rejects(runtimeVersion(process.execPath), /Unsupported runtime/);
 });
-test('final MCP config must still match the exact workspace grant after the probe process restarts', async t => {
+test('runtime connections validate MCP grants, home boundaries and startup ordering', async t => {
   const temp = await realpath(await mkdtemp(join(tmpdir(), 'ic-connect-')));
   t.after(() => rm(temp, { recursive: true, force: true }));
   const root = join(temp, 'workspace'),
@@ -57,6 +57,9 @@ test('final MCP config must still match the exact workspace grant after the prob
         stop() {
           this.stopped = true;
         },
+        async shutdown() {
+          this.stop();
+        },
         async request(method: string, params: unknown) {
           if (method === 'config/read') reads.push(params);
           return method === 'initialize'
@@ -78,11 +81,58 @@ test('final MCP config must still match the exact workspace grant after the prob
     ({
       notify() {},
       stop() {},
+      async shutdown() {},
       async request() {
         return { codexHome: unsafeHome };
       },
     }) as unknown as RuntimeClient;
   await assert.rejects(connect(executable, root), /separate directories/);
+
+  await t.test(
+    'initialization is serialized, a failed start drains before the next, and live RPC stays independent',
+    async () => {
+      let starts = 0,
+        active = 0,
+        peak = 0,
+        draining = false;
+      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+      RuntimeClient.spawn = () => {
+        assert.equal(draining, false, 'failed process must finish shutting down before the next spawn');
+        const index = starts++;
+        return {
+          notify() {},
+          stop() {},
+          async shutdown() {
+            draining = true;
+            await delay(20);
+            draining = false;
+          },
+          async request(method: string) {
+            if (method === 'initialize') {
+              peak = Math.max(peak, ++active);
+              await delay(100);
+              active--;
+              if (index === 0) throw new Error('synthetic initialization failure');
+              return { codexHome: home };
+            }
+            return method === 'config/read' ? { config: {} } : { active };
+          },
+        } as unknown as RuntimeClient;
+      };
+      const outcomes = await Promise.allSettled(Array.from({ length: 4 }, () => connect(executable, root)));
+      assert.equal(outcomes.filter(r => r.status === 'rejected').length, 1);
+      assert.equal(starts, 4, 'no request or process is retried');
+      assert.equal(peak, 1, 'native startup must not race over one home');
+      const live = outcomes.find(r => r.status === 'fulfilled');
+      assert.ok(live?.status === 'fulfilled');
+      const next = connect(executable, root);
+      const deadline = Date.now() + 5000;
+      while (active === 0 && Date.now() < deadline) await delay(5);
+      assert.equal(active, 1);
+      assert.deepEqual(await live.value.client.request('echo'), { active: 1 }, 'live RPC does not wait for startup');
+      await next;
+    },
+  );
 });
 
 import { runtimeSettings } from '../src/runtime/settings';

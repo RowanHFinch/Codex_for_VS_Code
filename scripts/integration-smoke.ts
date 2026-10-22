@@ -74,6 +74,20 @@ async function main() {
             }),
           ),
         );
+        try {
+          const { DatabaseSync } = await import('node:sqlite');
+          const db = new DatabaseSync(join(context.home, 'state_5.sqlite'), { readOnly: true });
+          try {
+            trace(
+              'backfill-state',
+              db.prepare('SELECT status, updated_at, last_success_at FROM backfill_state WHERE id=1').get(),
+            );
+          } finally {
+            db.close();
+          }
+        } catch {
+          trace('backfill-state-unavailable');
+        }
         if (process.platform !== 'win32' || !child.pid) return;
         try {
           const { stdout } = await promisify(execFile)(

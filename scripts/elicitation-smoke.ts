@@ -30,7 +30,15 @@ async function main() {
             : [{ name: tool.name }],
         )
         .find((t: any) => t.name?.includes('collect'));
-      assert.ok(tool, 'Native MCP collect tool missing from synthetic model request');
+      assert.ok(
+        tool,
+        'Native MCP collect tool missing: ' +
+          JSON.stringify({
+            url: request.url,
+            keys: Object.keys(body),
+            tools: body.tools?.map((t: any) => ({ type: t.type, name: t.name })),
+          }),
+      );
       const item = output
         ? {
             id: 'message-fixture',
@@ -162,6 +170,7 @@ async function main() {
       model: 'gpt-5.3-codex',
       supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Synthetic fixture' }],
     });
+    coordinator.state.model = 'gpt-5.3-codex';
     coordinator.state.effort = 'medium';
     for (const action of ['accept', 'decline', 'cancel']) {
       await coordinator.newThread();

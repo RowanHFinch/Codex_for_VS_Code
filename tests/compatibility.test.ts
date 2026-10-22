@@ -7,6 +7,7 @@ import { mcpFingerprint } from '../src/integrations';
 import { mkdtemp, mkdir, writeFile, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 
 test('runtime gate accepts the minimum and newer releases, including prereleases', () => {
   assert.equal(atLeast('0.152.0', '0.152.0'), true);
@@ -25,9 +26,21 @@ test('final MCP config must still match the exact workspace grant after the prob
   t.after(() => rm(temp, { recursive: true, force: true }));
   const root = join(temp, 'workspace'),
     home = join(temp, 'runtime-home'),
-    executable = join(temp, 'version');
+    executable = join(temp, process.platform === 'win32' ? 'version.exe' : 'version');
   await Promise.all([mkdir(root), mkdir(home)]);
-  await writeFile(executable, `#!${process.execPath}\nconsole.log('codex-cli 0.152.0');\n`, { mode: 0o700 });
+  if (process.platform === 'win32') {
+    const source =
+      'public class VersionFixture { public static void Main() { System.Console.WriteLine("codex-cli 0.152.0"); } }';
+    const script = `Add-Type -TypeDefinition '${source}' -OutputAssembly '${executable.replace(/'/g, "''")}' -OutputType ConsoleApplication`;
+    execFileSync('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-EncodedCommand',
+      Buffer.from(script, 'utf16le').toString('base64'),
+    ]);
+  } else {
+    await writeFile(executable, `#!${process.execPath}\nconsole.log('codex-cli 0.152.0');\n`, { mode: 0o700 });
+  }
   const original = RuntimeClient.spawn;
   t.after(() => {
     RuntimeClient.spawn = original;

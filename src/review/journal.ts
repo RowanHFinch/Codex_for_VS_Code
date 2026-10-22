@@ -33,11 +33,14 @@ export class EditJournal {
       await file.close();
     }
     if (!first) await rename(temp, path);
-    const directory = await open(this.directory, 'r');
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
+    // shortcut: Node cannot fsync directories on Windows; native directory flushing needs a platform helper.
+    if (process.platform !== 'win32') {
+      const directory = await open(this.directory, 'r');
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
     }
   }
   async prepare(data: Pick<EditRecord, 'path' | 'threadId' | 'turnId' | 'callId' | 'before' | 'after'>) {

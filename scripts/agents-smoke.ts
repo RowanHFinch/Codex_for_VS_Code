@@ -99,7 +99,7 @@ async function main() {
     assert.ok(read(), message);
   };
   try {
-    // Test-only provider override. Production connect() refuses custom endpoints.
+    // Isolated loopback provider; no external service or user credentials.
     await writeFile(
       join(home, 'config.toml'),
       `model = "gpt-5.3-codex"\nmodel_provider = "synthetic"\ncli_auth_credentials_store = "file"\n[model_providers.synthetic]\nname = "Synthetic local fixture"\nbase_url = "http://127.0.0.1:${address.port}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\nsupports_websockets = false\n[features]\nmulti_agent = true\nhooks = false\nplugins = false\nmemories = false\napps = false\n[projects.${JSON.stringify(root)}]\ntrust_level = "trusted"\n`,
@@ -168,9 +168,8 @@ async function main() {
         features: { multi_agent: true },
       }),
     );
-    assert.equal(coordinator.state.account, 'unavailable');
-    // Only this isolated synthetic-provider test bypasses account entitlement; no user credential exists.
-    coordinator.state.account = 'chatgpt';
+    await deadline(() => coordinator!.state.account !== 'unknown', 'Native account read did not settle');
+    assert.equal(coordinator.state.account, 'provider');
     coordinator.state.effort = 'medium';
     coordinator.state.models.push({
       ...coordinator.state.models[0],
@@ -178,6 +177,7 @@ async function main() {
       model: 'gpt-5.3-codex',
       supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Synthetic fixture' }],
     });
+    coordinator.state.model = 'gpt-5.3-codex';
     await coordinator.newThread();
     await coordinator.send('SYNTHETIC_PARENT_TASK: spawn the synthetic child.');
     await deadline(

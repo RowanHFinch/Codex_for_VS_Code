@@ -320,5 +320,5 @@ try {
   if (uiPort && !uiLive && !uiReuse && !uiMcp && !uiSidebar)
     console.log('Native restart receipt:', await readFile(join(workspace, 'editor-restore-result.json'), 'utf8'));
 } finally {
-  await rm(temp, { recursive: true, force: true });
+  await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

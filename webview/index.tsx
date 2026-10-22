@@ -520,7 +520,7 @@ function Chat({ state }: { state: ViewState }) {
     api.setState({ draft, focusView: !focusView });
   };
   // New chat replaces the current one in place, as in the official clients; the old chat stays in
-  // History. Only a chat that is still working keeps its tab, and the new chat opens beside it.
+  // History. Keep working chats and unsent drafts in their tab when opening another chat.
   const startNewChat = () => {
     if (call.current || (state.voice && state.voice.status !== 'idle')) {
       endCall();
@@ -533,7 +533,7 @@ function Chat({ state }: { state: ViewState }) {
       state.status === 'unknown' ||
       state.agents?.busy ||
       state.agents?.tasks.some(task => ['running', 'active', 'pendingInit'].includes(task.status));
-    if (working) post({ type: 'newTab' });
+    if (working || (!state.threadId && (draft.trim() || state.images?.length))) post({ type: 'newTab' });
     else if (state.threadId) post({ type: 'new' });
     else document.getElementById('composer')?.focus();
   };

@@ -81,3 +81,36 @@ archive allowlist, licenses and digest; it does not replace functional tests.
   `a548dcb274be00df4cdf080745826e530490d0a21ab8ff3e3b87379d4cc0a2d9`.
 - The release tag remains fixed at the tested source commit; this later document
   update records publication results without rebuilding or replacing version 0.9.0.
+
+## Windows startup investigation — unreleased changes
+
+The first attempt of [run 39813431545](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39813431545/attempts/1)
+failed in the native Windows integration fixture with a 30-second `initialize`
+timeout. Its successful second attempt does not establish a root cause or fix.
+The failed attempt did not record process sequence, stdout EOF or frame metadata;
+`#1` is the first request of each process, not necessarily the first startup in the script.
+
+Two Windows workers each completed 30 integration iterations in
+[run 39815387737](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39815387737).
+Two more each completed 10 full OAuth/form/agent/integration/Hook sequences in
+[run 39816894588](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39816894588).
+Together these instrumented 720 integration-fixture initializations with the
+original transport, all below one second (maximum 983 ms). No request was retried.
+This did not reproduce the original timeout. The failed runner used image
+`20261018.275.1`; the stress runners used `20261021.278.1`, so these are not an
+identical-host reproduction. macOS also passed 20 iterations / 180 initializations.
+
+A separate fault-injection test did reproduce a client defect: if stdout ends
+while the child remains alive, pending work was reported as a timeout and the
+connection still accepted new sends. The client now handles EOF as a disconnect,
+rejects pending delivery as unknown, and refuses subsequent sends. Regression
+tests verify the still-running child case and a complete final reply immediately
+followed by EOF. A focused independent review checked frame ordering and no replay.
+This is a confirmed fix for that failure mode, **not proof of the original CI cause**.
+
+Regular integration CI now records process lifecycle and bounded frame summaries
+without request/result payloads. Failure-only stderr capture is confined to the
+empty-home synthetic fixture. The manual `startup_diagnostics` workflow runs full
+native sequences on two Windows runners, fails on the first error and has no retry.
+The original timeout remains unresolved until a failing trace identifies its cause;
+neither increasing timeouts nor rerunning to green is considered a resolution.

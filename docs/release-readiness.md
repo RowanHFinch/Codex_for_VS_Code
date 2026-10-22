@@ -1,39 +1,73 @@
 # Release acceptance
 
-Version **0.9.0**, publisher **RowanHuang**. Stable publication is pending the
-checks below. The Preview flag remains enabled until the release decision.
+Version **0.9.0**, publisher **RowanHuang**. The stable package has no Preview flag.
+Source acceptance is complete for the matrix below; Marketplace publication and
+installation readback are the final distribution checks.
 
-## Verified before this release pass
+## Platform evidence — 2026-10-22
 
-The 2026-10-22 performance review completed 213 offline regressions, strict types,
-production builds, native runtime fixtures, macOS source/installed-editor tests,
-package allowlist/license checks and a focused independent restore/concurrency review.
-It explicitly did not certify Windows, a fresh Linux build, screen readers,
-long-duration concurrency, microphone or external OAuth providers.
+[CI run 39810429347](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39810429347)
+passed all six jobs at source commit `1c65574`.
 
-Earlier releases exercised Linux ARM64 and emulated Linux x64, but those results
-are not proof for the current source. Prior actual account-backed native edit
-approval, undo and rewind tests establish only their recorded runtime/model scope.
+| Check | macOS | Ubuntu | Windows |
+| --- | --- | --- | --- |
+| 218 offline regressions, strict types, build, VSIX verification | Passed | Passed | Passed |
+| Dependency audit | Passed | Passed | Passed |
+| Codex 0.152.0 native OAuth, forms, agents, integrations and ecosystem fixtures | Passed | Passed | Passed |
+| Installed VSIX editor, pre-apply diff, context, file mentions and recovery tests | Passed | Passed | Passed |
+| Sidebar navigation/drafts and native MCP form UI | Passed | Passed | Not run |
 
-## Current release pass — 2026-10-22
+Linux ARM64 container checks also passed on an earlier candidate; they are
+supplementary evidence, not certification of subsequent audio changes. The final
+metadata/package commit runs the same CI workflow before distribution.
 
-- Repository cleanup: historical assessments, duplicate ledgers, local receipts and
-  previous binaries archived outside the public source tree. The complete original
-  110 feature IDs and acceptance criteria remain in `feature-matrix.json`.
-- Read-only publication review: no verified credentials, personal paths/transcripts
-  or proprietary UI bundles found in public source or historical Git blobs.
-- Fresh local `npm run check`: 213 tests passed, types and production build passed.
-- Publisher identity verified in Marketplace. Upload has not been performed.
-- Current package/editor/platform checks and remote CI: pending.
+## Real account and device checks
 
-## Remaining acceptance
+- macOS live-account editor: native edit approval/diff, undo, rewind, title update
+  and archive passed in a temporary workspace.
+- macOS microphone, Codex `0.163.0-alpha.11`: the owner confirmed a complete Chinese
+  sentence after the final-audio fix, and confirmed that New chat stops recording
+  without adding a late transcript. The transcript remained an unsent draft.
+- Renderer checks: cancellation during local audio startup and active recording;
+  a fresh chat from an unsent draft; returning to the original preserved draft;
+  toolbar keyboard navigation and Escape dismissal. No microphone was simulated
+  as a hardware acceptance result.
+- Existing native MCP configuration: bearer authentication discovered 42 tools.
+  SCYS OAuth required reauthorization in the native runtime too; the owner
+  completed consent. A fresh runtime reused the credential and discovered 53 tools.
+  Both existing servers subsequently connected without another login, and native
+  configuration bytes were unchanged.
+- A real SCYS `listMenu` call completed using native OAuth and one-time approval
+  through the supported form schema. Only public tag metadata was requested;
+  no external write or persistent tool-approval grant was made. This check used
+  runtime `0.163.0-alpha.11` and model `gpt-5.6-sol`; editor form rendering is covered
+  separately by the native synthetic-service UI tests above.
+- A focused independent review checked audio ownership, cancellation and late
+  callbacks. Regression tests cover owner visibility/disposal, conversation
+  switching, final transcript deltas and cancellation during transcription.
 
-- Run the current package through macOS and Linux editor/runtime checks and Windows CI.
-- Check keyboard/accessibility behavior; automated semantics are not screen-reader acceptance.
-- Verify real microphone and external OAuth behavior before claiming those integrations.
-- Exercise prolonged and concurrent sessions; small fixtures do not establish soak reliability.
-- Confirm public repository/support URLs, package metadata, clean source history,
-  dependency audit, published listing and installation of the published artifact.
+## Publication hygiene
 
-Remote hosts, full vendor parity and every model/provider combination are outside
-the initial release scope. Missing roadmap features must not be advertised as complete.
+Historical assessments, duplicate ledgers, private test receipts and previous
+binaries were archived outside the public source tree. The original development
+Git history was also archived; the public repository starts with a clean export.
+All 110 original feature IDs and acceptance criteria remain in `feature-matrix.json`.
+A read-only publication review found no verified credentials, personal transcripts
+or proprietary UI bundles in the public export. Package verification checks the
+archive allowlist, licenses and digest; it does not replace functional tests.
+
+## Coverage limits
+
+- Real microphone evidence is macOS-only. Other audio devices, other operating
+  systems and other OAuth providers are not certified by those checks.
+- Full screen-reader compatibility and long-duration soak reliability remain
+  unverified. Basic keyboard checks do not establish full accessibility acceptance.
+- Newer alpha runtimes are not guaranteed compatible with every feature. A local
+  Hook fixture once timed out, then passed an isolated retry and three consecutive
+  runs; the original transient failure was not conclusively explained.
+- Remote/virtual hosts, arbitrary MCP form schemas, complete vendor parity and
+  every model/provider combination are outside the initial supported scope.
+  The feature ledger is a roadmap, not a claim of complete parity.
+
+Marketplace listing, GitHub release assets and installation of the published
+artifact must be read back before publication is reported as complete.

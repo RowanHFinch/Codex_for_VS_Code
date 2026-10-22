@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.9.0 — Release candidate
+## 0.9.0
 
-First public release candidate, consolidating local development versions.
+First public release, consolidating local development versions.
 
 - Independent Codex client with CLI sign-in reuse, English/Simplified Chinese UI,
   sidebar/editor chat surfaces and a separate session-management panel.
@@ -10,6 +10,9 @@ First public release candidate, consolidating local development versions.
   diagnostics, session history, child tasks and conversation export.
 - Skills, MCP configuration/forms, native ecosystem controls, local memory browsing,
   image attachment, terminal integration and response annotations.
+- Dictation waits for final audio; New chat cancels pending/active recording and
+  preserves an unsent draft in its previous tab.
+- Existing native MCP configuration and OAuth credentials are reused.
 - Faster runtime readiness, deferred chat creation, paginated history and reduced
   renderer work during streaming and draft editing.
 - Hardened restoration paths, dirty-buffer and conflict checks, rollback handling,

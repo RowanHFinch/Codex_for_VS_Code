@@ -5,9 +5,9 @@ and its existing sign-in to chat about code, review proposed edits, manage sessi
 and work with editor context. The interface follows VS Code's language and theme,
 with English and Simplified Chinese support.
 
-This project is not affiliated with or endorsed by OpenAI. **0.9.0 is currently a
-release candidate with the Preview flag retained until release acceptance is complete.**
-See [release status](docs/release-readiness.md) for the verified scope and open checks.
+This project is not affiliated with or endorsed by OpenAI.
+See [release acceptance](docs/release-readiness.md) for verified platforms, runtime
+versions and known limitations.
 
 ## Features
 
@@ -22,7 +22,8 @@ See [release status](docs/release-readiness.md) for the verified scope and open 
   inspect diagnostics, and add excerpts of an assistant response to your next message.
 - Browse workspace history, rename/archive/fork chats, export messages and plans,
   inspect native child tasks, and view account limits and token usage.
-- Discover Skills, configure MCP servers, answer supported MCP forms, and manage
+- Reuse native Codex MCP configuration and credentials, discover Skills, answer
+  supported MCP forms, and manage
   supported native Hooks, plugins and agent definitions.
 - Browse local Codex memories without editing them. Dictation depends on runtime,
   account and microphone support.
@@ -37,8 +38,9 @@ not a claim that every reference feature is implemented.
 2. Run `codex login` in a terminal. The extension reuses the CLI's existing sign-in;
    it does not create another account or provide a billing service. API-key usage
    follows your provider's billing policy.
-3. Install the extension's VSIX using **Extensions: Install from VSIX…**. Public
-   release availability is tracked in [release status](docs/release-readiness.md).
+3. Install **Codex for VS Code** by **RowanHuang** from the
+   [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=RowanHuang.independent-codex-vscode),
+   or install a release VSIX using **Extensions: Install from VSIX…**.
 4. Open a trusted local folder, then choose **Codex for VS Code: Open Chat** from
    the Command Palette or click the extension's Activity Bar icon.
 
@@ -47,6 +49,16 @@ The CLI and editor must use the same OS user and `CODEX_HOME`. The Codex home an
 workspace must be separate directories, with neither containing the other.
 On macOS, automatic discovery can also select an installed desktop runtime;
 an explicit runtime path takes precedence.
+
+## Existing MCP connections
+
+The extension discovers the MCP servers already configured in your native Codex
+home and lets the runtime reuse its stored credentials. You do not need to add
+those servers again. Approve access for the workspace before using their tools;
+this is a local trust decision, not another service account. If the native
+runtime requires sign-in again, use the server’s OAuth action. Desktop app
+connectors and local CLI MCP servers are distinct integrations; availability
+depends on the selected runtime.
 
 ## Review and recovery
 
@@ -83,13 +95,14 @@ UI locale does not change model response or speech language.
 ## Boundaries
 
 - Local desktop workspaces only; remote and virtual hosts are unsupported.
-- The current package's macOS acceptance and remaining platform checks are listed
-  in [release status](docs/release-readiness.md). A passing build is not an OS test.
+- The tested platform/runtime matrix is listed in
+  [release acceptance](docs/release-readiness.md). A passing build is not an OS test.
 - The runtime controls model access, tools and permissions. Trusted Hooks, plugins,
   MCP servers and shell commands can have effects outside file-edit review.
 - Local Codex memory is separate from ChatGPT web memory. Advanced plugin/app auth,
   arbitrary MCP schemas, full reference parity and screen-reader acceptance remain
-  incomplete. Microphone and external identity-provider behavior need real service testing.
+  incomplete. Real dictation and OAuth checks cover the specific host and provider
+  recorded in release acceptance; they do not certify every device or service.
 - Runtime read-only mode is not a workspace-only read sandbox. Prompts and selected
   context are sent to the configured provider when you send a message.
 

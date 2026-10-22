@@ -1,4 +1,4 @@
-name: Validate preview
+name: Validate extension
 on:
   push:
   pull_request:

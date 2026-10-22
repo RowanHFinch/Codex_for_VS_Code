@@ -1,10 +1,10 @@
 {
   "name": "independent-codex-vscode",
   "displayName": "Codex for VS Code",
-  "description": "Independent Codex client with local CLI sign-in, native edit review, session management and editor context. Preview.",
+  "description": "Independent Codex client with local CLI sign-in, native edit review, session management and editor context.",
   "version": "0.9.0",
   "publisher": "RowanHuang",
-  "preview": true,
+  "preview": false,
   "icon": "media/icon.png",
   "license": "MIT",
   "engines": {

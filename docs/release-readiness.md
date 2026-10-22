@@ -112,7 +112,84 @@ This is a confirmed fix for that failure mode, **not proof of the original CI ca
 
 Regular integration CI now records process lifecycle and bounded frame summaries
 without request/result payloads. Failure-only stderr capture is confined to the
-empty-home synthetic fixture. The manual `startup_diagnostics` workflow runs full
-native sequences on two Windows runners, fails on the first error and has no retry.
+empty-home synthetic fixture. Earlier manual `startup_diagnostics` runs exercised
+full native sequences on two Windows runners, failing on errors without retries.
 The original timeout remains unresolved until a failing trace identifies its cause;
 neither increasing timeouts nor rerunning to green is considered a resolution.
+
+### Controlled cold-start contention — 2026-10-22
+
+The comparison in [run 39821433265](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39821433265)
+used the same Windows runner, Codex 0.152.0 and eight simultaneous `connect()` calls:
+
+| Native homes | First initialization | Subsequent initialization |
+| --- | --- | --- |
+| Eight separate homes | 8 passed | 8 passed |
+| One shared home | 5 passed, 3 failed | 8 passed |
+
+The failed shared-home processes reported native SQLite initialization errors and
+closed stdout before returning any protocol frame (254–636 ms). Initialization
+bytes had already flushed. An earlier Windows run also failed 3 of 8 shared cold
+starts; five macOS controls failed only the shared cold case, with all other
+cases passing. This isolates a native first-start concurrency defect, but its
+early process exit is **not the original 30-second timeout**.
+
+The extension now serializes spawn, handshake and startup configuration checks
+within one extension host. Failed starts await the existing bounded shutdown
+before releasing the queue; failures do not poison the queue or trigger retries.
+Already connected clients' ordinary RPC calls do not acquire this queue. This
+does not coordinate other VS Code windows, CLI/desktop clients or repair native
+database state. Shutdown waits at most three seconds, not indefinitely for OS exit.
+
+The focused regression failed before the fix (four simultaneous initializations)
+and passed after it (one), also checking recovery after failure and independent
+live RPC. Local strict types, 221 tests and build passed; all six regular CI jobs
+passed at `2845e46` in [run 39822316493](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39822316493).
+
+The unmodified sequential Windows reproduction additionally completed 100 fresh
+homes / 901 initializations. Two first starts took 9.8 and 10.9 seconds. At five
+seconds they had flushed input but emitted no stdout; the file snapshots showed
+SQLite database/journal creation. This narrows the observed slow path but does
+not prove the original timeout's cause. A separate four-fixture pressure run
+completed 922 initializations, with a 17.9-second maximum and no failed request.
+Slow-start diagnostics now also read only the temporary database's backfill status and retain ten seconds of observation
+after a failed deadline, without resending or accepting the late result as a pass.
+
+The diagnostic workflow compares cold/warm, shared/separate homes and runs four
+independent integration fixtures concurrently. It preserves any failure rather
+than retrying it. These changes remain on the investigation branch; no new
+Marketplace version or release tag has been published.
+
+The post-queue four-fixture pressure worker in
+[run 39822319336](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39822319336)
+completed 935 initializations (maximum 9.25 seconds). Its 22 slow-start snapshots
+included 17 completed backfills, one pending backfill and four unavailable reads;
+none captured a running backfill. These samples therefore do not support blaming
+all observed delays on a stuck backfill lease. Process snapshots succeeded three
+times and were unavailable 19 times; future failures record only the helper's
+error code, kill flag and signal, without command output or environment contents.
+Different runners and instrumentation prevent treating the two maxima as a
+controlled performance improvement.
+
+An isolated macOS Codex 0.152.0 fault injection confirmed one possible 30-second
+failure mechanism: a fresh successful startup took 210 ms; changing only the
+fixture's backfill row to an unexpired `running` lease caused no protocol response
+and native exit after 30,117 ms with an explicit backfill-wait error; restoring the
+original row restored initialization in 63 ms. This modified only a disposable
+fixture, never a user's database. It validates that diagnostic signature, **not
+that the original Windows CI failure had that cause**. The extension must not
+reset native database leases or replay requests based on this hypothesis.
+
+The same run's controlled worker completed ten of each cold/warm, shared/separate
+case: 80 initializations per case, all successful. In total it recorded 407
+successful initializations (maximum 4.10 seconds), then the 15-minute **job**
+limit canceled the worker during the tenth iteration's ordinary integration
+sequence. One pending initialization was interrupted by cancellation, not observed
+to reach its request deadline. This is partial evidence, not a fully passed
+20-iteration run. The manual shared-home loop is now bounded to five iterations
+to fit the existing job budget; the 30-second RPC deadline and failure assertions
+remain unchanged. The four-independent-fixture pressure loop remains 25 batches.
+
+Merge and publication remain blocked on the original timeout investigation.
+The original runner is gone and lacked a failure trace; newer-runner green jobs,
+controlled cold-start fixes and injected faults cannot reconstruct that event.

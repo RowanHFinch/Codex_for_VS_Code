@@ -103,8 +103,13 @@ async function main() {
             { timeout: 5000, maxBuffer: 65536, windowsHide: true },
           );
           trace('windows-process', JSON.parse(stdout));
-        } catch {
-          trace('windows-process-unavailable');
+        } catch (error) {
+          const failure = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string };
+          trace('windows-process-unavailable', {
+            code: failure.code,
+            killed: failure.killed,
+            signal: failure.signal,
+          });
         }
       };
       const frames: unknown[] = [];

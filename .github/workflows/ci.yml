@@ -10,8 +10,8 @@ on:
         description: Run isolated Windows startup reproduction
       runtime_version:
         type: string
-        default: '0.163.0'
-        description: Codex CLI version for native checks (0.152.0 reproduces the pre-fix SQLite startup path)
+        default: '0.152.0'
+        description: Codex CLI version for native checks
 permissions:
   contents: read
 jobs:
@@ -55,7 +55,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run release:local
-      - run: npm install --global @openai/codex@${{ inputs.runtime_version || '0.163.0' }}
+      - run: npm install --global @openai/codex@${{ inputs.runtime_version || '0.152.0' }}
       - run: npm run test:oauth
       - run: npm run test:elicitation
       - run: npm run test:agents
@@ -92,7 +92,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm install --global @openai/codex@${{ inputs.runtime_version || '0.163.0' }}
+      - run: npm install --global @openai/codex@${{ inputs.runtime_version || '0.152.0' }}
       - name: Reproduce native startup without retries
         run: |
           foreach ($check in @('test:oauth', 'test:elicitation', 'test:agents')) {

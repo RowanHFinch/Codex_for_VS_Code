@@ -2,8 +2,6 @@
 
 Requires **VS Code 1.142.0+** and **Codex CLI 0.152.0+**. A minimum-version check
 is not a guarantee that every newer alpha or future protocol is compatible.
-Codex 0.160.0 or newer is recommended: earlier runtimes can stall for about 30
-seconds while first creating their SQLite state, before answering `initialize`.
 Current release evidence is in [release-readiness.md](release-readiness.md).
 
 ## Host and runtime

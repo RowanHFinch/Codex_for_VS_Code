@@ -194,7 +194,7 @@ Merge and publication remain blocked on the original timeout investigation.
 The original runner is gone and lacked a failure trace; newer-runner green jobs,
 controlled cold-start fixes and injected faults cannot reconstruct that event.
 
-### Native SQLite startup stall in Codex 0.152.0 — 2026-10-22
+### Upstream SQLite startup hypothesis and runtime A/B — 2026-10-22
 
 Source review of the pinned runtime identified a native mechanism that matches
 the original failure better than the cold-start concurrency defect. The failed
@@ -221,12 +221,37 @@ created, close to multiples of the five-second busy timeout. Both upstream fixes
 first ship in Codex 0.160.0; local macOS runs of the OAuth, form, agent,
 integration and foundation fixtures pass on 0.163.0.
 
-CI therefore installs Codex 0.163.0 by default. `workflow_dispatch` accepts
-`runtime_version` so the Windows `startup_diagnostics` reproduction can compare
-0.152.0 and 0.163.0 on the same workflow. The extension's minimum stays 0.152.0
-(protocol baseline); users on 0.152.0–0.159.x can still hit this native stall,
-and the extension cannot repair native database leases or retry `initialize`.
+#### Windows A/B result: hypothesis not supported
 
-Status: **root-cause hypothesis supported by upstream source and Windows timing,
-not yet confirmed by a failing trace.** Windows A/B results are recorded below
-when available; merge and publication remain blocked until then.
+Commit `df18cdb` ran all six regular jobs on 0.163.0 successfully
+([run 39826596405](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39826596405)).
+The same `startup_diagnostics` workflow then ran with each runtime:
+
+| Runtime | Run | Four-fixture pressure worker | Sequential + shared/separate worker |
+| --- | --- | --- | --- |
+| 0.152.0 | [39826605438](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39826605438) | **Failed:** 144 inits, then four simultaneous 30 s `initialize` timeouts | Passed: 205 inits, max 11.4 s, 4 over 5 s |
+| 0.163.0 | [39826666515](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39826666515) | **Failed:** 427 inits (max 7.2 s), then a native SQLite state-runtime initialization error after 72 ms | Passed: 205 inits, max 10.8 s, 11 over 5 s |
+
+The 0.152.0 failure reproduces the original signature on a single fresh home
+per fixture: zero stdout bytes and no exit at 30 seconds. Its diagnostics show
+the process was **progressing, not deadlocked**: file snapshots advanced through
+`state_5`, `logs_2`, `goals_1` and `memories_1` creation (about 5–10 seconds per
+database, with rollback-journal files present), the backfill row was still
+`pending`, and two processes logged normal app-server startup about 44 seconds
+after spawn. In the pressure worker, the four independent fixtures repeatedly
+slowed down by nearly identical amounts in the same batch, which points to a
+host-wide file I/O bottleneck rather than a per-process lock.
+
+0.163.0 still showed multi-second cold starts of the same shape, so the upstream
+SQLite connection-setup fixes do not remove this slow path, and the per-connection
+writer-lock explanation above is **not supported** as the cause. CI therefore
+stays on 0.152.0 by default; `runtime_version` remains available for comparisons.
+The 0.163.0 pressure failure (separate homes, immediate native error) is a further
+sign of file-level interference during SQLite creation; its underlying OS error
+was not printed by the runtime.
+
+Current conclusion: the original timeout is a native cold start that exceeded 30
+seconds while creating its SQLite databases under slow Windows file I/O. What
+slows file creation on the runner (for example real-time antivirus scanning of
+new database and journal files, or disk throughput) is **not yet identified**.
+Merge and publication remain blocked.

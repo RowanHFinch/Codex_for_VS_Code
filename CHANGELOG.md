@@ -7,9 +7,7 @@
   Connected clients continue to run ordinary requests independently.
 - Treat a closed runtime output pipe as a disconnect immediately, preserving a
   complete final response and refusing further sends instead of waiting for an RPC timeout.
-- Validate native checks against Codex 0.163.0. Codex 0.152.0–0.159.x can stall
-  for 30 seconds before answering `initialize` while creating its SQLite state
-  (fixed upstream in 0.160.0); 0.160.0 or newer is recommended.
+- Allow manual CI runs to select the Codex CLI version for native checks.
 - Capture bounded process/frame metadata in isolated native integration CI, and
   provide a manual Windows startup reproduction workflow without request retries.
 

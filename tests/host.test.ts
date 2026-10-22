@@ -693,6 +693,7 @@ test('annotation dictation appends to the original comment, never the composer, 
     let finish!: (text: string) => void;
     const channel: any = {
       dictation: {
+        async dispose() {},
         stop: () =>
           new Promise<string>(resolve => {
             finish = resolve;
@@ -792,10 +793,12 @@ test('cancel during voice answer delivery cannot start or overwrite the next mic
   host.tabs = { get: () => ({ state: { locale: 'en' } }) };
   host.channels.set('a', channel);
   const view = {
-    postMessage: () =>
-      new Promise<void>(resolve => {
-        delivered = resolve;
-      }),
+    postMessage: (message: { type: string }) =>
+      message.type !== 'voiceAnswer'
+        ? Promise.resolve()
+        : new Promise<void>(resolve => {
+            delivered = resolve;
+          }),
   };
   const bound = { channelId: 'a', surface: 'chat' };
   const first = host.action({ type: 'voiceOffer', sdp: 'v=0' }, 'a', view, bound);
@@ -883,4 +886,167 @@ test('state broadcasts coalesce bursts, skip hidden panels and omit unchanged tr
   host.broadcast();
   await new Promise(resolve => setTimeout(resolve, 40));
   assert.equal(messages[4].state.items, c.state.items, 'failed delivery requires a complete snapshot');
+});
+
+test('hiding or disposing the recording view stops its microphone and closes the retained peer', async () => {
+  for (const event of ['hidden', 'disposed']) {
+    const { host, vscode } = hostFixture('/fixture');
+    host.context = { extensionUri: {} };
+    host.views = new Map();
+    host.tabs = { active: 'a' };
+    vscode.Uri.joinPath = () => '/fixture';
+    let visible = true,
+      visibility!: () => void,
+      dispose!: () => void,
+      released = 0,
+      closed = 0;
+    const messages: any[] = [];
+    const view = {
+      asWebviewUri: () => '/fixture',
+      postMessage: async (m: any) => {
+        messages.push(m);
+      },
+      onDidReceiveMessage: () => ({ dispose() {} }),
+    };
+    host.bind(
+      view,
+      (f: () => void) => {
+        dispose = f;
+        return { dispose() {} };
+      },
+      () => visible,
+      (f: () => void) => {
+        visibility = f;
+        return { dispose() {} };
+      },
+    );
+    const channel = {
+      voiceView: view,
+      voice: { status: 'recording' },
+      microphone: {
+        release() {
+          released++;
+        },
+      },
+      dictation: {
+        async dispose() {
+          closed++;
+        },
+      },
+    };
+    host.channels.set('a', channel);
+    if (event === 'hidden') {
+      visible = false;
+      visibility();
+    } else dispose();
+    assert.equal(released, 1);
+    await tick();
+    assert.equal(closed, 1);
+    assert.equal(channel.voice.status, 'idle');
+    assert.deepEqual(messages, [{ type: 'voiceFailed', channelId: 'a' }]);
+  }
+});
+
+test('a different view cannot cancel a recording, but switching its owner chat cancels it', async () => {
+  const { host } = hostFixture('/fixture');
+  const owner = { async postMessage() {} },
+    other = {};
+  let released = 0,
+    disposed = 0;
+  host.channels.set('a', {
+    voiceView: owner,
+    voice: { status: 'recording' },
+    microphone: {
+      release() {
+        released++;
+      },
+    },
+    dictation: {
+      async dispose() {
+        disposed++;
+      },
+    },
+  });
+  const bound = { channelId: 'a', surface: 'editor', files: { dispose() {} } };
+  host.views = new Map([[owner, bound]]);
+  host.tabs = { get: () => ({ state: { status: 'idle' } }), async select() {} };
+  await host.cancelVoice('a', other);
+  assert.equal(released, 0);
+  await host.select(owner, 'b');
+  assert.equal(released, 1);
+  assert.equal(disposed, 1);
+  assert.equal(bound.channelId, 'b');
+});
+
+test('cancel while transcribing disposes the retained runtime and never inserts its late text', async () => {
+  const { host } = hostFixture('/fixture');
+  let finish!: (text: string) => void,
+    released = 0,
+    disposed = 0;
+  const messages: any[] = [],
+    view = {
+      async postMessage(m: any) {
+        messages.push(m);
+      },
+    };
+  const dictation = {
+    stop: () =>
+      new Promise<string>(resolve => {
+        finish = resolve;
+      }),
+    async dispose() {
+      disposed++;
+    },
+  };
+  const channel: any = {
+    voiceView: view,
+    voice: { status: 'recording' },
+    dictation,
+    microphone: {
+      release() {
+        released++;
+      },
+    },
+  };
+  host.channels.set('a', channel);
+  host.views = new Map([[view, { channelId: 'a', surface: 'chat' }]]);
+  host.tabs = { get: () => ({ state: { locale: 'en' } }) };
+  const stopping = host.action({ type: 'voiceStop' }, 'a', view, { channelId: 'a', surface: 'chat' });
+  assert.equal(released, 1);
+  assert.equal(channel.dictation, dictation);
+  await host.cancelVoice('a', view);
+  finish('must not enter another draft');
+  await stopping;
+  assert.equal(disposed, 1);
+  assert.ok(messages.every(m => m.type !== 'voiceTranscript'));
+  assert.equal(channel.voice.status, 'idle');
+});
+
+test('completed dictation closes its owner peer without waiting for an idle broadcast', async () => {
+  const { host } = hostFixture('/fixture');
+  const messages: any[] = [];
+  const view = {
+    async postMessage(message: any) {
+      messages.push(message);
+    },
+  };
+  const channel: any = {
+    voiceView: view,
+    voice: { status: 'recording' },
+    dictation: {
+      async stop() {
+        return 'complete sentence';
+      },
+    },
+  };
+  host.channels.set('a', channel);
+  host.views = new Map([[view, { channelId: 'a', surface: 'chat' }]]);
+  host.tabs = { get: () => ({ state: { locale: 'en' } }) };
+  await host.action({ type: 'voiceStop' }, 'a', view, { channelId: 'a', surface: 'chat' });
+  assert.deepEqual(
+    messages.map(message => message.type),
+    ['voiceTranscript', 'voiceFailed'],
+  );
+  assert.equal(channel.voiceView, undefined);
+  assert.equal(channel.dictation, undefined);
 });

@@ -77,11 +77,11 @@ export class Dictation {
   }
   /** Ends the call after the webview stopped sending audio and returns the user's transcript. */
   async stop(settleMs = 1500) {
-    // The last words are transcribed shortly after the microphone stops.
+    // Keep WebRTC alive for queued audio and VAD's final words; one quiet sample can precede the final delta.
     let last = this.transcript;
     for (let waited = 0; waited < 6000; waited += settleMs) {
       await new Promise(r => setTimeout(r, settleMs));
-      if (this.transcript === last) break;
+      if (waited >= settleMs && this.transcript === last) break;
       last = this.transcript;
     }
     await this.dispose();

@@ -263,6 +263,7 @@ type Channel = {
   microphone?: Microphone;
   voice?: ViewState['voice'];
   voiceTarget?: { threadId: string; annotationId: string };
+  voiceView?: vscode.Webview;
   enabledMcp: string[];
 };
 type BoundView = {
@@ -407,12 +408,14 @@ class ChatHost {
     // Per-view listeners end with the view; keeping them in the extension's subscriptions leaked one set per panel.
     const listeners: vscode.Disposable[] = [
       onVisibility(() => {
+        if (!visible()) void this.cancelVoice(bound.channelId, webview);
         bound.sentItems = undefined;
         this.broadcast();
       }),
     ];
     listeners.push(
       onDispose(() => {
+        void this.cancelVoice(bound.channelId, webview);
         this.views.delete(webview);
         bound.files.dispose();
         for (const listener of listeners) listener.dispose();
@@ -486,7 +489,10 @@ class ChatHost {
     );
     const tabs = this.tabs.summary();
     for (const [view, bound] of this.views) {
-      if (!bound.visible()) continue;
+      if (!bound.visible()) {
+        void this.cancelVoice(bound.channelId, view);
+        continue;
+      }
       if (bound.surface === 'sidebar') bound.channelId = this.tabs.active;
       if (!this.tabs.sessions.has(bound.channelId)) bound.channelId = this.tabs.active;
       const c = this.tabs.get(bound.channelId),
@@ -540,11 +546,13 @@ class ChatHost {
             if (!delivered) bound.sentItems = undefined;
           },
           () => {
+            void this.cancelVoice(bound.channelId, view);
             this.views.delete(view);
             bound.files.dispose();
           },
         );
       } catch {
+        void this.cancelVoice(bound.channelId, view);
         this.views.delete(view);
         bound.files.dispose();
       }
@@ -566,12 +574,14 @@ class ChatHost {
       ]);
       const chat = this.views.get(chatView);
       if (!chat) throw new Error('Chat view closed.');
+      if (chat.channelId !== id) await this.cancelVoice(chat.channelId, chatView);
       // Reset local navigation even when selecting the already active chat.
       await chatView.postMessage({ type: 'showChat' });
       chat.files.dispose();
       chat.files = new WorkspaceFiles(this.root);
       chat.channelId = id;
     }
+    if (bound.channelId !== id) await this.cancelVoice(bound.channelId, view);
     bound.files.dispose();
     bound.files = new WorkspaceFiles(this.root);
     bound.channelId = id;
@@ -589,6 +599,25 @@ class ChatHost {
       !this.restoring
     )
       await this.connectChannel(id);
+  }
+  private async cancelVoice(channelId: string, owner?: vscode.Webview) {
+    const channel = this.channels.get(channelId);
+    if (!channel || (owner && channel.voiceView !== owner)) return;
+    const dictation = channel.dictation,
+      view = channel.voiceView;
+    channel.dictation = undefined;
+    channel.microphone?.release();
+    channel.microphone = undefined;
+    channel.voice = { status: 'idle' };
+    channel.voiceTarget = undefined;
+    channel.voiceView = undefined;
+    try {
+      if (view) void Promise.resolve(view.postMessage({ type: 'voiceFailed', channelId })).catch(() => {});
+    } catch {
+      /* The recording's view may already be disposed. */
+    }
+    await dictation?.dispose();
+    this.broadcast();
   }
   private grants() {
     return this.context.workspaceState.get<Record<string, string>>('mcpGrants', {});
@@ -1152,6 +1181,7 @@ class ChatHost {
         const id = action.type === 'closeTab' ? action.id : channelId;
         if (action.type === 'closeChat' && c.state.threadId !== action.threadId) throw new Error('Chat changed.');
         const closedThread = this.tabs.get(id).state.threadId;
+        await this.cancelVoice(id);
         await this.tabs.close(id);
         if (closedThread)
           this.closedThreads = [...this.closedThreads.filter(t => t !== closedThread), closedThread].slice(-10);
@@ -1184,6 +1214,7 @@ class ChatHost {
         break;
       case 'new':
         if (this.mcpNeedsReconnect) throw new Error('Reconnect integrations before creating a chat.');
+        await this.cancelVoice(channelId);
         await c.newThread();
         channel.images.adopt(c.state.threadId);
         break;
@@ -1193,6 +1224,7 @@ class ChatHost {
           await this.select(webview, id);
           await this.tabs.get(id).newThread(true);
         } else {
+          await this.cancelVoice(channelId);
           await c.newThread(true);
           channel.images.adopt(c.state.threadId);
         }
@@ -1401,6 +1433,7 @@ class ChatHost {
           )) === label
         ) {
           if (action.threadId !== c.state.threadId) throw new Error('Chat changed.');
+          await this.cancelVoice(channelId);
           await c.archive();
         }
         break;
@@ -1820,6 +1853,7 @@ class ChatHost {
         )
           throw new Error('This annotation is no longer available.');
         const annotationId = action.annotationId;
+        channel.voiceView = webview;
         channel.voiceTarget = annotationId ? { threadId: action.threadId!, annotationId } : undefined;
         const starting = (channel.voice = { status: 'starting', annotationId } as const);
         this.broadcast();
@@ -1869,9 +1903,8 @@ class ChatHost {
       }
       case 'voiceStop': {
         const dictation = channel.dictation;
-        if (!dictation) break;
+        if (!dictation || channel.voice?.status === 'transcribing') break;
         const target = channel.voiceTarget;
-        channel.dictation = undefined;
         channel.microphone?.release();
         channel.microphone = undefined;
         const transcribing = (channel.voice = { status: 'transcribing', annotationId: target?.annotationId } as const);
@@ -1909,6 +1942,17 @@ class ChatHost {
         } catch (error) {
           if (channel.voice !== transcribing) break;
           channel.voice = { status: 'idle', error: error instanceof Error ? error.message : String(error) };
+        } finally {
+          if (channel.dictation === dictation) {
+            try {
+              if (channel.voiceView)
+                void Promise.resolve(channel.voiceView.postMessage({ type: 'voiceFailed', channelId })).catch(() => {});
+            } catch {
+              /* The recording's view may already be disposed. */
+            }
+            channel.dictation = undefined;
+            channel.voiceView = undefined;
+          }
         }
         this.broadcast();
         break;
@@ -1920,14 +1964,7 @@ class ChatHost {
             channel.voiceTarget.threadId !== action.threadId)
         )
           break;
-        const dictation = channel.dictation;
-        channel.dictation = undefined;
-        channel.microphone?.release();
-        channel.microphone = undefined;
-        channel.voice = { status: 'idle' };
-        channel.voiceTarget = undefined;
-        await dictation?.dispose();
-        this.broadcast();
+        await this.cancelVoice(channelId);
         break;
       }
       case 'refreshTerminals':
@@ -2117,7 +2154,9 @@ class ChatHost {
   async dispose() {
     this.disposed = true;
     clearTimeout(this.broadcastTimer);
+    const voices = [...this.channels.keys()].map(id => this.cancelVoice(id));
     await this.tabs.dispose();
+    await Promise.allSettled(voices);
     for (const channel of this.channels.values()) {
       channel.auth?.dispose();
       channel.memories?.clear();

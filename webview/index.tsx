@@ -410,6 +410,9 @@ function Chat({ state }: { state: ViewState }) {
     call.current = null;
   }, []);
   useEffect(() => endCall, [endCall]);
+  useEffect(() => {
+    if (state.voice?.status === 'idle') endCall();
+  }, [state.voice?.status, endCall]);
   const playFrame = (base64: string, rate: number) => {
     const current = call.current;
     if (!current) return;
@@ -1200,7 +1203,6 @@ function Chat({ state }: { state: ViewState }) {
                 }}
                 dictate={id => {
                   if (state.voice?.status === 'recording' && state.voice.annotationId === id) {
-                    endCall();
                     post({ type: 'voiceStop' });
                   } else void startCall(id);
                 }}
@@ -1438,7 +1440,6 @@ function Chat({ state }: { state: ViewState }) {
                         className="voice-done"
                         title={t.voiceStop}
                         onClick={() => {
-                          endCall();
                           post({ type: 'voiceStop' });
                         }}
                       >

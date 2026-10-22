@@ -168,6 +168,7 @@ try {
   let failure;
   const launchArgs = [
     workspace,
+    ...(process.platform === 'linux' ? ['--disable-gpu', '--disable-dev-shm-usage'] : []),
     ...(process.platform === 'linux' && (process.getuid?.() === 0 || process.env.CI === 'true')
       ? ['--no-sandbox']
       : []),

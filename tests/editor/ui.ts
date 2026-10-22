@@ -178,7 +178,11 @@ export async function nativeUiTests(root: string) {
       await read(
         `(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Input missing');e.focus();e.select();return true})()`,
       );
-      await cdp.request('Input.insertText', { text: value }, workbench.sessionId);
+      if (selector === '.mcp-form input[type=number]')
+        await read(
+          `(()=>{const e=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`,
+        );
+      else await cdp.request('Input.insertText', { text: value }, workbench.sessionId);
       await until(
         () => read(`document.querySelector(${JSON.stringify(selector)})?.value===${JSON.stringify(value)}`),
         'Native composer input did not update',

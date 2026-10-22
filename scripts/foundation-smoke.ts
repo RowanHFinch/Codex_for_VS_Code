@@ -137,6 +137,7 @@ async function main() {
       active.on('notification', m => {
         const p = m.params as any;
         if (p?.threadId !== started.thread.id) return;
+        if (m.method === 'hook/completed') console.log('Synthetic hook completion:', JSON.stringify(p).slice(0, 4000));
         if (m.method === 'turn/started') startedTurn = true;
         if (m.method === 'turn/completed') terminal = true;
       });

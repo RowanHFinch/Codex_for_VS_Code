@@ -22,7 +22,7 @@ export async function proposedDiffTests(root: string) {
     const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
     assert.ok(tab?.input instanceof vscode.TabInputTextDiff, 'A native diff tab must open');
     const input = tab.input as vscode.TabInputTextDiff;
-    assert.equal(input.original.fsPath, file);
+    assert.equal(input.original.fsPath, vscode.Uri.file(file).fsPath);
     assert.equal(input.modified.scheme, PROPOSED_SCHEME);
     assert.equal((await vscode.workspace.openTextDocument(input.modified)).getText(), 'alpha\ngamma\n');
     assert.equal(await readFile(file, 'utf8'), 'alpha\nbeta\n', 'Opening a proposed diff must not write the file');

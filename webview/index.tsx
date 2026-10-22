@@ -522,6 +522,10 @@ function Chat({ state }: { state: ViewState }) {
   // New chat replaces the current one in place, as in the official clients; the old chat stays in
   // History. Only a chat that is still working keeps its tab, and the new chat opens beside it.
   const startNewChat = () => {
+    if (call.current || (state.voice && state.voice.status !== 'idle')) {
+      endCall();
+      post({ type: 'voiceCancel' });
+    }
     setPane('chat');
     setHistory(false);
     const working =

@@ -28,7 +28,7 @@ export async function fileMentionTests(root: string) {
     assert.ok(!result.files.some(file => /env|innocent|outside|hard/.test(file.path)));
     assert.ok(result.files.every(file => !('text' in file) && !('uri' in file)));
     const main = result.files.find(file => file.path === 'mentions/main.ts')!;
-    assert.equal((await catalog.resolve(main.id)).fsPath, join(folder, 'main.ts'));
+    assert.equal((await catalog.resolve(main.id)).fsPath, vscode.Uri.file(join(folder, 'main.ts')).fsPath);
     await assert.rejects(otherView.resolve(main.id), /search changed/);
     await assert.rejects(catalog.resolve('../../.env'), /search changed/);
     const binary = result.files.find(file => file.path.endsWith('binary.bin'))!;

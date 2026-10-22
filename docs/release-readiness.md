@@ -1,13 +1,13 @@
 # Release acceptance
 
 Version **0.9.0**, publisher **RowanHuang**. The stable package has no Preview flag.
-Source acceptance is complete for the matrix below; Marketplace publication and
-installation readback are the final distribution checks.
+The release is public on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=RowanHuang.independent-codex-vscode)
+and [GitHub Releases](https://github.com/RowanHFinch/Codex_for_VS_Code/releases/tag/v0.9.0).
 
 ## Platform evidence — 2026-10-22
 
-[CI run 39810429347](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39810429347)
-passed all six jobs at source commit `1c65574`.
+[Final release CI run 39811768366](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39811768366)
+passed all six jobs at release commit `91c7e22` (tag `v0.9.0`).
 
 | Check | macOS | Ubuntu | Windows |
 | --- | --- | --- | --- |
@@ -19,7 +19,7 @@ passed all six jobs at source commit `1c65574`.
 
 Linux ARM64 container checks also passed on an earlier candidate; they are
 supplementary evidence, not certification of subsequent audio changes. The final
-metadata/package commit runs the same CI workflow before distribution.
+metadata/package commit passed the same CI workflow before distribution.
 
 ## Real account and device checks
 
@@ -69,5 +69,15 @@ archive allowlist, licenses and digest; it does not replace functional tests.
   every model/provider combination are outside the initial supported scope.
   The feature ledger is a roadmap, not a claim of complete parity.
 
-Marketplace listing, GitHub release assets and installation of the published
-artifact must be read back before publication is reported as complete.
+## Distribution verification — 2026-10-22
+
+- The Marketplace public listing is available with publisher Rowan Huang.
+- VS Code installed `RowanHuang.independent-codex-vscode@0.9.0` directly from the
+  Marketplace into an isolated profile. Its manifest has `preview: false`.
+- All 44 non-manifest extension files match the uploaded VSIX byte for byte.
+  The package manifest also matches after removing gallery-added metadata.
+- The public GitHub release VSIX was downloaded again and verified against its
+  published SHA-256 file:
+  `a548dcb274be00df4cdf080745826e530490d0a21ab8ff3e3b87379d4cc0a2d9`.
+- The release tag remains fixed at the tested source commit; this later document
+  update records publication results without rebuilding or replacing version 0.9.0.

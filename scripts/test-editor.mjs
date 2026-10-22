@@ -126,11 +126,13 @@ try {
   const explicit = process.env.VSCODE_EXECUTABLE_PATH,
     installed = '/Applications/Visual Studio Code.app/Contents/MacOS/Code';
   if (explicit && !existsSync(explicit)) throw new Error('VSCODE_EXECUTABLE_PATH does not exist.');
-  const executable =
+  let executable =
     explicit ||
     (process.platform === 'darwin' && existsSync(installed)
       ? installed
       : await downloadAndUnzipVSCode(process.env.VSCODE_TEST_VERSION || '1.142.0'));
+  if (process.platform === 'darwin' && !existsSync(executable) && existsSync(join(dirname(executable), 'Code')))
+    executable = join(dirname(executable), 'Code');
   let developmentPath = resolve('.');
   const profileArgs = ['--user-data-dir', join(temp, 'profile'), '--extensions-dir', join(temp, 'extensions')];
   if (process.env.CODEX_TEST_VSIX) {
@@ -166,7 +168,9 @@ try {
   let failure;
   const launchArgs = [
     workspace,
-    ...(process.platform === 'linux' && process.getuid?.() === 0 ? ['--no-sandbox'] : []),
+    ...(process.platform === 'linux' && (process.getuid?.() === 0 || process.env.CI === 'true')
+      ? ['--no-sandbox']
+      : []),
     ...(process.env.CODEX_TEST_VSIX ? ['--disable-extension', 'github.copilot-chat'] : ['--disable-extensions']),
     '--disable-workspace-trust',
     '--skip-welcome',
@@ -258,6 +262,7 @@ try {
     } catch (error) {
       failure = error;
     }
+  if (failure && !existsSync(join(workspace, 'editor-test-result.json'))) throw failure;
   const receipt = JSON.parse(await readFile(join(workspace, 'editor-test-result.json'), 'utf8'));
   if (!receipt.ok) throw new Error(receipt.error);
   if (failure) throw failure;

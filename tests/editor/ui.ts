@@ -132,7 +132,7 @@ export async function nativeUiTests(root: string) {
     await cdp.request('Page.bringToFront', {}, workbench.sessionId);
     const read = (expression: string) => cdp.evaluate(frame, expression);
     // Chat actions live in the header "More actions" menu; other views live in its Settings page.
-    const menuItems = ['Copy chat as Markdown', 'Export chat to document', 'Settings'];
+    const menuItems = ['Copy chat as Markdown', 'Export chat to document', 'Archive current chat', 'Settings'];
     const hubItems = [
       'Skills',
       'MCP',
@@ -698,6 +698,17 @@ export async function nativeUiTests(root: string) {
           120000,
         );
         await until(async () => diffTabs().length === 0, 'Diff tab was not closed after acceptance', 10000);
+        // Hidden chats intentionally defer rendering; return from the file editor before checking the view.
+        const chatTab = await cdp.evaluate(
+          workbench,
+          `(()=>{const e=[...document.querySelectorAll('.tabs-container .tab')].find(e=>e.textContent==='Codex for VS Code');const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`,
+        );
+        for (const type of ['mousePressed', 'mouseReleased'])
+          await cdp.request(
+            'Input.dispatchMouseEvent',
+            { type, ...chatTab, button: 'left', clickCount: 1 },
+            workbench.sessionId,
+          );
         await until(
           () =>
             read(`!document.querySelector('[aria-label="Stop"]')&&Boolean(document.querySelector('.turn-changes'))`),

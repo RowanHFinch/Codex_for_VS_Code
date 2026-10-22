@@ -55,15 +55,10 @@ async function main() {
       join(temp, 'hook.cjs'),
       `require('node:fs').appendFileSync(process.argv[2], 'started\\n');process.stdout.write('{"continue":true}');`,
     );
-    const command = [process.execPath, join(temp, 'hook.cjs'), log]
-      .map((v, index) =>
-        process.platform === 'win32'
-          ? index === 0
-            ? 'node'
-            : JSON.stringify(v.replaceAll('\\', '/'))
-          : JSON.stringify(v),
-      )
-      .join(' ');
+    const command =
+      process.platform === 'win32'
+        ? `echo started >> "${log}"`
+        : [process.execPath, join(temp, 'hook.cjs'), log].map(v => JSON.stringify(v)).join(' ');
     await writeFile(
       join(home, 'hooks.json'),
       JSON.stringify({
@@ -145,7 +140,10 @@ async function main() {
         if (p?.threadId !== started.thread.id) return;
         if (m.method === 'hook/completed') console.log('Synthetic hook completion:', JSON.stringify(p).slice(0, 4000));
         if (m.method === 'turn/started') startedTurn = true;
-        if (m.method === 'turn/completed') terminal = true;
+        if (m.method === 'turn/completed') {
+          terminal = true;
+          if (p.turn?.error) console.log('Synthetic turn error:', JSON.stringify(p.turn.error).slice(0, 2000));
+        }
       });
       const turn = await active.request<any>('turn/start', {
         threadId: started.thread.id,

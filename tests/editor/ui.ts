@@ -178,7 +178,7 @@ export async function nativeUiTests(root: string) {
       await read(
         `(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Input missing');e.focus();e.select();return true})()`,
       );
-      if (selector === '.mcp-form input[type=number]')
+      if (selector.startsWith('.mcp-form input'))
         await read(
           `(()=>{const e=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`,
         );

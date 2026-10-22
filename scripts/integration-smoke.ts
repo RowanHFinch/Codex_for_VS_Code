@@ -17,8 +17,7 @@ async function main() {
     clients: RuntimeClient[] = [];
   // Only these child processes see the empty test home. No real sign-in or user config is copied.
   RuntimeClient.spawn = (executable, args, cwd) => {
-    const client = new RuntimeClient(
-      spawn(executable, args, {
+    const child = spawn(executable, args, {
         cwd,
         env: {
           PATH: process.env.PATH,
@@ -29,8 +28,31 @@ async function main() {
           CODEX_HOME: home,
         },
         stdio: ['pipe', 'pipe', 'pipe'],
-      }),
-    );
+      });
+    const client = new RuntimeClient(child);
+    if (process.env.CODEX_STARTUP_DIAGNOSTICS === '1') {
+      // This fixture always uses an empty home and synthetic services; never trace a user's runtime.
+      const index = clients.length + 1, started = Date.now();
+      const trace = (event: string, detail: unknown = {}) =>
+        console.log(JSON.stringify({ startup: index, pid: child.pid, ms: Date.now() - started, event, detail }));
+      let stderr = '';
+      child.stderr.on('data', data => { stderr = (stderr + data.toString()).slice(-8192); });
+      child.once('spawn', () => trace('spawn'));
+      child.stdout.once('data', () => trace('first-stdout'));
+      child.once('exit', (code, signal) => trace('exit', { code, signal }));
+      const request = client.request.bind(client);
+      client.request = async <T>(method: string, params?: unknown): Promise<T> => {
+        const at = Date.now();
+        try {
+          const result = await request<T>(method, params);
+          if (method === 'initialize') trace('initialized', { durationMs: Date.now() - at });
+          return result;
+        } catch (error) {
+          trace('request-failed', { method, durationMs: Date.now() - at, stderr });
+          throw error;
+        }
+      };
+    }
     clients.push(client);
     return client;
   };

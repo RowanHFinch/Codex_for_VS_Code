@@ -222,7 +222,7 @@ async function main() {
     RuntimeClient.spawn = original;
     await Promise.allSettled(clients.map(c => c.shutdown()));
     await new Promise<void>(resolve => http.close(() => resolve()));
-    await rm(temp, { recursive: true, force: true });
+    await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 void main().catch(error => {

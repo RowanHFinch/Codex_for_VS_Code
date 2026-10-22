@@ -36,7 +36,9 @@ Do not concurrently replace/rename workspace paths or save the same file from
 another window/client during review or restoration. Later text changes, linked ancestors, credential-like paths and unsaved buffers
 block restoration. Native undo rechecks before each write and rollback; failures
 that cannot be rolled back are reported explicitly. Multi-file crash atomicity
-and malicious same-user path replacement are not guaranteed. A cancellation racing with an already approved editor operation may
+and malicious same-user path replacement are not guaranteed. On Windows, checkpoint
+files are flushed, but Node cannot flush directory entries; recovery after power
+loss or an OS crash is not guaranteed. A cancellation racing with an already approved editor operation may
 leave the approved change applied; inspect the editor and prepared checkpoint.
 Do not blindly repeat unknown requests.
 

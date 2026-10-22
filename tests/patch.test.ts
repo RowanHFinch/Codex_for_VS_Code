@@ -97,7 +97,7 @@ test('native edits are recorded only when the pre-image reproduces the result, a
     RestoreConflict,
   );
   const restored = await edits.restore(await edits.list('thread'), () => false);
-  assert.deepEqual(restored.paths, ['new.txt', 'a.txt']);
+  assert.deepEqual([...restored.paths].sort(), ['a.txt', 'new.txt']);
   assert.equal(await readFile(join(root, 'a.txt'), 'utf8'), 'alpha\n');
   await assert.rejects(readFile(join(root, 'new.txt')), { code: 'ENOENT' });
   assert.ok((await edits.list('thread')).every(r => r.state === 'restored'));

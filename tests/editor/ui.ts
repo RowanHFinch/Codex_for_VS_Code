@@ -406,7 +406,7 @@ export async function nativeUiTests(root: string) {
       await until(
         () =>
           read(
-            `(()=>{const error=document.querySelector('[role=alert]');if(error)throw Error(error.textContent);return [...document.querySelectorAll('.welcome button')].some(e=>e.textContent==='New chat'&&!e.disabled)})()`,
+            `(()=>{const error=document.querySelector('[role=alert]');if(error)throw Error(error.textContent);return [...document.querySelectorAll('.welcome > button')].some(e=>e.textContent==='New chat'&&!e.disabled)})()`,
           ),
         'CLI reuse connection did not become ready',
         45000,
@@ -416,7 +416,7 @@ export async function nativeUiTests(root: string) {
             ': ' +
             JSON.stringify(
               await read(
-                `({connection:document.querySelector('.connection')?.textContent,welcome:document.querySelector('.welcome')?.textContent,buttons:[...document.querySelectorAll('.welcome button')].map(e=>({text:e.textContent,disabled:e.disabled})),error:document.querySelector('[role=alert]')?.textContent})`,
+                `({connection:document.querySelector('.connection')?.textContent,welcome:document.querySelector('.welcome')?.textContent,buttons:[...document.querySelectorAll('.welcome > button')].map(e=>({text:e.textContent,disabled:e.disabled})),error:document.querySelector('[role=alert]')?.textContent})`,
               ),
             ),
         );
@@ -596,42 +596,47 @@ export async function nativeUiTests(root: string) {
     }
     const chooseLiveModel = async (effort = 'low') => {
       const preferred = 'gpt-5.6-sol';
-      assert.ok(
-        await read(
-          `Boolean([...document.querySelector('[aria-label="Model"]').options].find(o=>o.value===${JSON.stringify(preferred)}))`,
-        ),
-        'Previously accepted live model is absent from the actual catalog',
-      );
-      await read(
-        `(()=>{const e=document.querySelector('[aria-label="Model"]');e.value=${JSON.stringify(preferred)};e.dispatchEvent(new Event('change',{bubbles:true}));return true})()`,
-      );
+      await click('Model');
+      await click('Select model');
+      const option = `[...document.querySelectorAll('.model-option')].find(e=>e.querySelector('span')?.textContent.toLowerCase().replace(/\\s+/g,'-')===${JSON.stringify(preferred)})`;
+      assert.ok(await read(`Boolean(${option})`), 'Previously accepted live model is absent from the actual catalog');
+      await read(`${option}.click()`);
       await until(
         () =>
           read(
-            `document.querySelector('[aria-label="Model"]')?.value===${JSON.stringify(preferred)}&&!document.querySelector('[aria-label="Reasoning"]')?.disabled`,
+            `document.querySelector('.model-picker > button')?.textContent.toLowerCase().includes('gpt-5.6')&&!document.querySelector('.model-picker > button').disabled`,
           ),
         'Explicit live model not selected',
-      ).catch(async error => {
-        throw new Error(
-          error.message +
-            ': ' +
-            JSON.stringify(
-              await read(
-                `({error:document.querySelector('[role=alert]')?.textContent,notice:document.querySelector('.notice')?.textContent,model:document.querySelector('[aria-label="Model"]')?.value,options:[...document.querySelector('[aria-label="Model"]').options].map(o=>o.value),status:document.querySelector('.connection')?.textContent})`,
-              ),
-            ),
-        );
-      });
-      await read(
-        `(()=>{const e=document.querySelector('[aria-label="Reasoning"]');if(![...e.options].some(o=>o.value===${JSON.stringify(effort)}))throw Error('Actual reasoning effort unavailable');e.value=${JSON.stringify(effort)};e.dispatchEvent(new Event('change',{bubbles:true}));return true})()`,
       );
+      if (!(await read(`Boolean(document.querySelector('input[aria-label="Reasoning"]'))`))) await click('Model');
+      const effortName = effort[0].toUpperCase() + effort.slice(1);
+      let found = false;
+      const maximum = Number(await read(`document.querySelector('input[aria-label="Reasoning"]').max`));
+      for (let index = 0; index <= maximum; index++) {
+        await read(
+          `(()=>{const e=document.querySelector('input[aria-label="Reasoning"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(String(index))});e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`,
+        );
+        if (
+          await read(
+            `document.querySelector('input[aria-label="Reasoning"]')?.getAttribute('aria-valuetext')===${JSON.stringify(effortName)}`,
+          )
+        ) {
+          await read(
+            `document.querySelector('input[aria-label="Reasoning"]').dispatchEvent(new PointerEvent('pointerup',{bubbles:true}))`,
+          );
+          found = true;
+          break;
+        }
+      }
+      assert.ok(found, 'Actual reasoning effort unavailable');
       await until(
         () =>
           read(
-            `document.querySelector('[aria-label="Reasoning"]')?.value===${JSON.stringify(effort)}&&!document.querySelector('.native-controls select')?.disabled`,
+            `document.querySelector('.model-picker > button')?.textContent.includes(${JSON.stringify(effortName)})&&!document.querySelector('.model-picker > button').disabled`,
           ),
         'Reasoning preference did not cross the native bridge',
       );
+      await read(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); true`);
       await click('Permissions and runtime');
       await read(
         `(()=>{const e=document.querySelector('.native-controls select');e.value=':workspace';e.dispatchEvent(new Event('change',{bubbles:true}));return true})()`,
@@ -704,7 +709,7 @@ export async function nativeUiTests(root: string) {
       await until(
         () =>
           read(
-            `Boolean(document.querySelector('[aria-label="New chat"]'))&&!document.querySelector('[aria-label="New chat"]').disabled&&!document.querySelector('.welcome button')`,
+            `Boolean(document.querySelector('[aria-label="New chat"]'))&&!document.querySelector('[aria-label="New chat"]').disabled&&!document.querySelector('.welcome > button')`,
           ),
         'Live sign-in unavailable',
         60000,
@@ -713,15 +718,15 @@ export async function nativeUiTests(root: string) {
       await until(
         () =>
           read(
-            `Boolean(document.querySelector('.conversation-title'))&&!document.querySelector('[aria-label="Model"]')?.disabled&&!document.querySelector('[aria-label="New chat tab"]')?.disabled`,
+            `Boolean(document.querySelector('textarea'))&&!document.querySelector('textarea').disabled&&!document.querySelector('[aria-label="Model"]')?.disabled`,
           ),
-        'Owned chat did not start',
+        'Native draft did not become ready',
         60000,
       );
       await chooseLiveModel('low');
       assert.equal(
-        await read(`document.querySelector('[aria-label="Mode"]')?.value`),
-        'ask',
+        await read(`document.querySelector('.approval-picker > button')?.textContent.trim()`),
+        'Review every edit',
         'New chats must ask before edits',
       );
       await turn('live-undo.txt');
@@ -763,7 +768,7 @@ export async function nativeUiTests(root: string) {
       await until(
         () =>
           read(
-            `!document.querySelector('[aria-label="New chat"]')?.disabled&&!document.querySelector('.welcome button')&&!document.querySelector('[aria-label="New chat tab"]')?.disabled`,
+            `!document.querySelector('[aria-label="New chat"]')?.disabled&&!document.querySelector('.welcome > button')&&!document.querySelector('[aria-label="New chat tab"]')?.disabled`,
           ),
         'Live sign-in unavailable',
       );

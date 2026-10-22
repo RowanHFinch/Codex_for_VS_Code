@@ -616,6 +616,7 @@ export async function nativeUiTests(root: string) {
         await read(
           `(()=>{const e=document.querySelector('input[aria-label="Reasoning"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(String(index))});e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`,
         );
+        await read(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
         if (
           await read(
             `document.querySelector('input[aria-label="Reasoning"]')?.getAttribute('aria-valuetext')===${JSON.stringify(effortName)}`,
@@ -703,7 +704,16 @@ export async function nativeUiTests(root: string) {
           'Turn did not finish with a changed-files card',
           240000,
         ).catch(async error => {
-          throw new Error(error.message + ': ' + (await hostError()));
+          throw new Error(
+            error.message +
+              ': ' +
+              JSON.stringify({
+                error: await hostError(),
+                stop: await read(`Boolean(document.querySelector('[aria-label="Stop"]'))`),
+                changes: await read(`document.querySelectorAll('.turn-changes').length`),
+                main: await read(`document.querySelector('main')?.textContent?.slice(-6000)`),
+              }),
+          );
         });
       };
       await until(
@@ -731,7 +741,7 @@ export async function nativeUiTests(root: string) {
       );
       await turn('live-undo.txt');
       await read(
-        `[...document.querySelectorAll('.turn-changes button')].find(e=>e.textContent==='Undo changes').click()`,
+        `[...document.querySelectorAll('.turn-changes button')].find(e=>e.textContent.trim()==='Undo').click()`,
       );
       await dialog('Undo changes');
       await until(

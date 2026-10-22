@@ -132,18 +132,11 @@ async function main() {
       // SessionStart is lazy in 0.152; interrupt this empty-auth turn after local startup.
       let startedTurn = false,
         terminal = false;
-      const finished = new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Unauthenticated local turn did not stop')), 15000);
-        active.on('notification', m => {
-          const p = m.params as any;
-          if (p?.threadId !== started.thread.id) return;
-          if (m.method === 'turn/started') startedTurn = true;
-          if (m.method === 'turn/completed') {
-            terminal = true;
-            clearTimeout(timer);
-            resolve();
-          }
-        });
+      active.on('notification', m => {
+        const p = m.params as any;
+        if (p?.threadId !== started.thread.id) return;
+        if (m.method === 'turn/started') startedTurn = true;
+        if (m.method === 'turn/completed') terminal = true;
       });
       const turn = await active.request<any>('turn/start', {
         threadId: started.thread.id,
@@ -154,7 +147,7 @@ async function main() {
       if (expectedHook) await wait(async () => (await count()) === 1);
       else await new Promise(r => setTimeout(r, 250));
       if (!terminal) await active.request('turn/interrupt', { threadId: started.thread.id, turnId: turn.turn.id });
-      await finished;
+      await wait(async () => terminal);
       return started;
     };
     await start();
@@ -252,7 +245,10 @@ async function main() {
   } finally {
     RuntimeClient.spawn = original;
     await Promise.allSettled(clients.map(c => c.shutdown()));
-    await rm(temp, { recursive: true, force: true });
+    await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(error => {
+      console.error('Fixture cleanup failed:', (error as NodeJS.ErrnoException).code);
+      process.exitCode = 1;
+    });
   }
 }
 void main().catch(error => {

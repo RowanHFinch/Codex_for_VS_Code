@@ -29,6 +29,13 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     case 'exit':
       process.exit(7);
       break;
+    case 'closeOutput':
+      process.stdout.end();
+      break;
+    case 'replyAndClose':
+      reply(m.params);
+      process.stdout.end();
+      break;
     case 'malformed':
       process.stdout.write('not JSON\n');
       break;

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, realpath, writeFile, readFile, rm } from 'node:fs/promi
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
-import { RuntimeClient } from '../src/runtime/client';
+import { JsonLines, RuntimeClient } from '../src/runtime/client';
 import { connect, sharedConnection } from '../src/runtime/compatibility';
 import { Integrations, mcpFingerprint } from '../src/integrations';
 
@@ -18,27 +18,46 @@ async function main() {
   // Only these child processes see the empty test home. No real sign-in or user config is copied.
   RuntimeClient.spawn = (executable, args, cwd) => {
     const child = spawn(executable, args, {
-        cwd,
-        env: {
-          PATH: process.env.PATH,
-          SystemRoot: process.env.SystemRoot,
-          HOME: temp,
-          USERPROFILE: temp,
-          TMPDIR: process.env.TMPDIR,
-          CODEX_HOME: home,
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      cwd,
+      env: {
+        PATH: process.env.PATH,
+        SystemRoot: process.env.SystemRoot,
+        HOME: temp,
+        USERPROFILE: temp,
+        TMPDIR: process.env.TMPDIR,
+        CODEX_HOME: home,
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     const client = new RuntimeClient(child);
     if (process.env.CODEX_STARTUP_DIAGNOSTICS === '1') {
       // This fixture always uses an empty home and synthetic services; never trace a user's runtime.
-      const index = clients.length + 1, started = Date.now();
+      const index = clients.length + 1,
+        started = Date.now();
       const trace = (event: string, detail: unknown = {}) =>
         console.log(JSON.stringify({ startup: index, pid: child.pid, ms: Date.now() - started, event, detail }));
       let stderr = '';
-      child.stderr.on('data', data => { stderr = (stderr + data.toString()).slice(-8192); });
+      let stdoutBytes = 0;
+      const frames: unknown[] = [];
+      const parsed = new JsonLines(message => {
+        frames.push({ id: message.id, method: message.method, result: 'result' in message, error: 'error' in message });
+        if (frames.length > 8) frames.shift();
+      });
+      child.stderr.on('data', data => {
+        stderr = (stderr + data.toString()).slice(-8192);
+      });
       child.once('spawn', () => trace('spawn'));
       child.stdout.once('data', () => trace('first-stdout'));
+      child.stdout.on('data', data => {
+        stdoutBytes += data.length;
+        try {
+          parsed.push(data);
+        } catch {
+          trace('malformed-output');
+        }
+      });
+      child.stdout.once('end', () => trace('stdout-end'));
+      child.stdout.once('close', () => trace('stdout-close'));
       child.once('exit', (code, signal) => trace('exit', { code, signal }));
       const request = client.request.bind(client);
       client.request = async <T>(method: string, params?: unknown): Promise<T> => {
@@ -48,7 +67,7 @@ async function main() {
           if (method === 'initialize') trace('initialized', { durationMs: Date.now() - at });
           return result;
         } catch (error) {
-          trace('request-failed', { method, durationMs: Date.now() - at, stderr });
+          trace('request-failed', { method, durationMs: Date.now() - at, stdoutBytes, frames, stderr });
           throw error;
         }
       };

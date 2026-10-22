@@ -56,6 +56,8 @@ jobs:
       - run: npm run test:elicitation
       - run: npm run test:agents
       - run: npm run test:integrations
+        env:
+          CODEX_STARTUP_DIAGNOSTICS: '1'
       - run: npm run test:foundation
       - run: ${{ runner.os == 'Linux' && 'xvfb-run -a npm run test:editor' || 'npm run test:editor' }}
       - if: runner.os != 'Windows'

@@ -72,6 +72,26 @@ test('malformed stream closes transport', async t => {
   await assert.rejects(client.request('malformed'));
   assert.equal(client.connected, false);
 });
+test('stdout EOF rejects pending work while the runtime is still alive and prevents new sends', async t => {
+  const child = spawn(process.execPath, ['tests/fixtures/runtime.cjs'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const client = new RuntimeClient(child, 5000);
+  t.after(() => client.shutdown());
+  await assert.rejects(
+    client.request('closeOutput'),
+    e => e instanceof DeliveryError && e.delivery === 'unknown' && /output pipe closed/.test(e.message),
+  );
+  assert.equal(child.exitCode, null, 'EOF must be handled before the runtime exits');
+  assert.equal(client.connected, false);
+  await assert.rejects(client.request('echo'), e => e instanceof DeliveryError && e.delivery === 'not-sent');
+});
+test('a complete final response is preserved when stdout closes immediately after it', async t => {
+  const client = runtime(5000);
+  t.after(() => client.shutdown());
+  const disconnected = once(client, 'disconnect', { signal: AbortSignal.timeout(5000) });
+  assert.deepEqual(await client.request('replyAndClose', { text: 'final 中文' }), { text: 'final 中文' });
+  await disconnected;
+  assert.equal(client.connected, false);
+});
 test('pipe errors reject pending delivery without an unhandled stream error', async t => {
   const process = spawn(globalThis.process.execPath, ['tests/fixtures/runtime.cjs'], {
     stdio: ['pipe', 'pipe', 'pipe'],

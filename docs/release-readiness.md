@@ -105,7 +105,9 @@ while the child remains alive, pending work was reported as a timeout and the
 connection still accepted new sends. The client now handles EOF as a disconnect,
 rejects pending delivery as unknown, and refuses subsequent sends. Regression
 tests verify the still-running child case and a complete final reply immediately
-followed by EOF. A focused independent review checked frame ordering and no replay.
+followed by EOF. They inject EOF at the client's readable stream boundary; this
+does not certify Windows child-process handle closure. Removing the fix makes
+both tests fail. A focused independent review checked frame ordering and no replay.
 This is a confirmed fix for that failure mode, **not proof of the original CI cause**.
 
 Regular integration CI now records process lifecycle and bounded frame summaries

@@ -92,7 +92,9 @@ test('a complete final response is preserved when stdout closes immediately afte
   const client = new RuntimeClient(child, 5000);
   t.after(() => client.shutdown());
   const disconnected = once(client, 'disconnect', { signal: AbortSignal.timeout(5000) });
-  child.stdout.once('data', () => child.stdout.push(null));
+  child.stdout.on('data', (chunk: Buffer) => {
+    if (chunk.includes(10)) child.stdout.push(null);
+  });
   assert.deepEqual(await client.request('echo', { text: 'final 中文' }), { text: 'final 中文' });
   await disconnected;
   assert.equal(child.exitCode, null);

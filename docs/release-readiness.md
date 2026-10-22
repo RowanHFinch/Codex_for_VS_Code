@@ -193,3 +193,40 @@ remain unchanged. The four-independent-fixture pressure loop remains 25 batches.
 Merge and publication remain blocked on the original timeout investigation.
 The original runner is gone and lacked a failure trace; newer-runner green jobs,
 controlled cold-start fixes and injected faults cannot reconstruct that event.
+
+### Native SQLite startup stall in Codex 0.152.0 — 2026-10-22
+
+Source review of the pinned runtime identified a native mechanism that matches
+the original failure better than the cold-start concurrency defect. The failed
+attempt timed out on the **first** `initialize` of a single fresh home about 31.5
+seconds after the fixture started; no other client shared that home.
+
+In `rust-v0.152.0` (tagged 2026-09-01), every new connection in a writable state
+pool (up to five per database) applied `journal_mode=WAL` and
+`auto_vacuum=INCREMENTAL` through SQLx connect options, with a five-second
+`busy_timeout`. Upstream later documented that the vacuum setter takes the writer
+lock even when unchanged, so a connection opened while another holds a write
+transaction can wait and fail; SQLx then retries connection setup and reports
+`PoolTimedOut` after its default 30-second acquire timeout
+([openai/codex#49032](https://github.com/openai/codex/pull/49032),
+[openai/codex#49102](https://github.com/openai/codex/pull/49102)). State database
+initialization runs before the app-server answers `initialize`. Separately, a
+failed `mark_backfill_complete` write in 0.152.0 is only logged, leaving a fresh
+900-second `running` lease owned by the same process; the startup gate then waits
+its 30-second limit and exits (the signature reproduced by fault injection above).
+
+The Windows evidence above is consistent with this: slow first starts of 9.8,
+10.9, 17.9 and 9.25 seconds produced no stdout while SQLite files were being
+created, close to multiples of the five-second busy timeout. Both upstream fixes
+first ship in Codex 0.160.0; local macOS runs of the OAuth, form, agent,
+integration and foundation fixtures pass on 0.163.0.
+
+CI therefore installs Codex 0.163.0 by default. `workflow_dispatch` accepts
+`runtime_version` so the Windows `startup_diagnostics` reproduction can compare
+0.152.0 and 0.163.0 on the same workflow. The extension's minimum stays 0.152.0
+(protocol baseline); users on 0.152.0–0.159.x can still hit this native stall,
+and the extension cannot repair native database leases or retry `initialize`.
+
+Status: **root-cause hypothesis supported by upstream source and Windows timing,
+not yet confirmed by a failing trace.** Windows A/B results are recorded below
+when available; merge and publication remain blocked until then.

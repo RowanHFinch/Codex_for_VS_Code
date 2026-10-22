@@ -373,7 +373,7 @@ async function main() {
     assert.ok(httpLive.state.servers[0].tools.includes('echo_http'));
     assert.ok(httpCalls > 0);
     console.log(
-      'PASS: isolated Codex 0.152.0 Skills list/toggle/selection; MCP CAS CRUD, unknown-field preservation, ungranted probe/inventory/thread refusal, granted stdio and HTTP tool discovery. No auth copied and no model/tool calls.',
+      `PASS: isolated Codex ${runtime.version} Skills list/toggle/selection; MCP CAS CRUD, unknown-field preservation, ungranted probe/inventory/thread refusal, granted stdio and HTTP tool discovery. No auth copied and no model/tool calls.`,
     );
   } finally {
     RuntimeClient.spawn = original;

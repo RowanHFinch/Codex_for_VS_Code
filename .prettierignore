@@ -1,0 +1,7 @@
+src/protocol/
+dist/
+work/
+node_modules/
+*.json
+*.md
+*.html

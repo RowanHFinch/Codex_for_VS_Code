@@ -1,0 +1,331 @@
+{
+  "name": "independent-codex-vscode",
+  "displayName": "Codex for VS Code",
+  "description": "Independent Codex client with local CLI sign-in, native edit review, session management and editor context. Preview.",
+  "version": "0.9.0",
+  "publisher": "RowanHuang",
+  "preview": true,
+  "icon": "media/icon.png",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.142.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "independentCodex.open",
+        "title": "%command.open%",
+        "category": "Codex for VS Code",
+        "icon": {
+          "light": "media/icon-light.svg",
+          "dark": "media/icon.svg"
+        }
+      },
+      {
+        "command": "independentCodex.editor",
+        "title": "%command.editor%",
+        "category": "Codex for VS Code"
+      },
+      {
+        "command": "independentCodex.addSelection",
+        "title": "%command.selection%",
+        "category": "Codex for VS Code"
+      },
+      {
+        "command": "independentCodex.logs",
+        "title": "%command.logs%",
+        "category": "Codex for VS Code"
+      },
+      {
+        "command": "independentCodex.worktree",
+        "title": "%command.worktree%",
+        "category": "Codex for VS Code"
+      },
+      {
+        "command": "independentCodex.diagnostics",
+        "title": "%command.diagnostics%",
+        "category": "Codex for VS Code"
+      },
+      {
+        "command": "independentCodex.instructions",
+        "title": "%command.instructions%",
+        "category": "Codex for VS Code"
+      },
+      {
+        "command": "independentCodex.checkpoints",
+        "title": "%command.checkpoints%",
+        "category": "Codex for VS Code"
+      },
+      {
+        "command": "independentCodex.settings",
+        "title": "%command.settings%",
+        "category": "Codex for VS Code",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "independentCodex.acceptProposedDiff",
+        "title": "%command.acceptDiff%",
+        "category": "Codex for VS Code",
+        "icon": "$(check)",
+        "enablement": "independentCodex.viewingProposedDiff"
+      },
+      {
+        "command": "independentCodex.rejectProposedDiff",
+        "title": "%command.rejectDiff%",
+        "category": "Codex for VS Code",
+        "icon": "$(close)",
+        "enablement": "independentCodex.viewingProposedDiff"
+      },
+      {
+        "command": "independentCodex.reopenClosed",
+        "title": "%command.reopenClosed%",
+        "category": "Codex for VS Code"
+      }
+    ],
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "independentCodex",
+          "title": "Codex for VS Code",
+          "icon": "media/icon.svg"
+        }
+      ],
+      "activitybar": [
+        {
+          "id": "independentCodexManager",
+          "title": "Codex for VS Code",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "independentCodex": [
+        {
+          "type": "webview",
+          "id": "independentCodex.chat",
+          "name": "%view.chat%"
+        }
+      ],
+      "independentCodexManager": [
+        {
+          "type": "webview",
+          "id": "independentCodex.managerView",
+          "name": "%view.manager%"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "independentCodex.addSelection",
+          "when": "editorHasSelection",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "independentCodex.acceptProposedDiff",
+          "when": "independentCodex.viewingProposedDiff",
+          "group": "navigation@1"
+        },
+        {
+          "command": "independentCodex.rejectProposedDiff",
+          "when": "independentCodex.viewingProposedDiff",
+          "group": "navigation@2"
+        },
+        {
+          "command": "independentCodex.open",
+          "group": "navigation@8",
+          "when": "!independentCodex.viewingProposedDiff"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "independentCodex.open",
+        "key": "ctrl+alt+i",
+        "mac": "cmd+alt+i"
+      },
+      {
+        "command": "independentCodex.open",
+        "key": "ctrl+escape",
+        "mac": "cmd+escape",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "workbench.action.focusActiveEditorGroup",
+        "key": "ctrl+escape",
+        "mac": "cmd+escape",
+        "when": "focusedView == independentCodex.chat || activeWebviewPanelId == independentCodex.chat"
+      },
+      {
+        "command": "independentCodex.editor",
+        "key": "ctrl+shift+escape",
+        "mac": "cmd+shift+escape"
+      },
+      {
+        "command": "independentCodex.addSelection",
+        "key": "alt+k",
+        "when": "editorTextFocus && editorHasSelection"
+      },
+      {
+        "command": "independentCodex.acceptProposedDiff",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "independentCodex.viewingProposedDiff && editorTextFocus && resourceScheme == codex-proposed"
+      },
+      {
+        "command": "independentCodex.rejectProposedDiff",
+        "key": "ctrl+backspace",
+        "mac": "cmd+backspace",
+        "when": "independentCodex.viewingProposedDiff && editorTextFocus && resourceScheme == codex-proposed"
+      }
+    ],
+    "configuration": {
+      "title": "Codex for VS Code",
+      "properties": {
+        "independentCodex.runtimePath": {
+          "type": "string",
+          "default": "codex",
+          "scope": "machine",
+          "description": "%setting.runtime%"
+        },
+        "independentCodex.locale": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "en",
+            "zh-CN"
+          ],
+          "default": "auto",
+          "scope": "application",
+          "description": "%setting.locale%",
+          "enumDescriptions": [
+            "%setting.locale.auto%",
+            "English",
+            "简体中文"
+          ]
+        },
+        "independentCodex.sendKey": {
+          "type": "string",
+          "enum": [
+            "enter",
+            "modEnter"
+          ],
+          "default": "enter",
+          "description": "%setting.sendKey%"
+        },
+        "independentCodex.initialPermissionMode": {
+          "type": "string",
+          "enum": [
+            "askBeforeEdits",
+            "editAutomatically",
+            "codexConfig"
+          ],
+          "default": "askBeforeEdits",
+          "description": "%setting.permissionMode%",
+          "enumDescriptions": [
+            "%setting.permissionMode.ask%",
+            "%setting.permissionMode.auto%",
+            "%setting.permissionMode.config%"
+          ]
+        },
+        "independentCodex.autosave": {
+          "type": "boolean",
+          "default": true,
+          "description": "%setting.autosave%"
+        },
+        "independentCodex.attachOpenFile": {
+          "type": "boolean",
+          "default": true,
+          "description": "%setting.attachOpenFile%"
+        },
+        "independentCodex.attachSelection": {
+          "type": "boolean",
+          "default": true,
+          "description": "%setting.attachSelection%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test --test-reporter=spec tests/*.test.ts",
+    "test:live": "tsx scripts/live-smoke.ts",
+    "test:boundaries": "tsx scripts/live-boundaries.ts",
+    "test:runtime": "tsx scripts/offline-smoke.ts",
+    "test:performance": "tsx scripts/performance.ts",
+    "test:sandbox": "tsx scripts/runtime-sandbox.ts",
+    "test:approval": "tsx scripts/live-approval.ts",
+    "test:tools": "tsx scripts/live-tools.ts",
+    "test:ui": "node tests/webview-server.mjs",
+    "test:editor": "node scripts/test-editor.mjs",
+    "package": "vsce package --out dist/codex-for-vscode-0.9.0.vsix",
+    "check": "npm run typecheck && npm test && npm run build",
+    "verify:package": "node scripts/verify-package.mjs",
+    "release:local": "npm run check && npm run package && npm run verify:package",
+    "vscode:prepublish": "npm run build",
+    "test:integrations": "tsx scripts/integration-smoke.ts",
+    "test:foundation": "tsx scripts/foundation-smoke.ts",
+    "test:oauth": "tsx scripts/oauth-smoke.ts",
+    "test:agents": "tsx scripts/agents-smoke.ts",
+    "test:agents:live": "tsx scripts/live-agents.ts",
+    "test:elicitation": "tsx scripts/elicitation-smoke.ts",
+    "test:native-edit": "tsx scripts/native-edit-smoke.ts",
+    "format": "prettier --write \"src/**/*.ts\" \"webview/**/*.{ts,tsx,css}\" \"tests/**/*.{ts,mjs,cjs}\" \"scripts/**/*.{ts,mjs}\""
+  },
+  "dependencies": {
+    "@picovoice/pvrecorder-node": "^1.2.9",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/vscode": "^1.96.0",
+    "@vscode/test-electron": "^2.5.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.25.0",
+    "prettier": "^3.9.10",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "keywords": [
+    "codex",
+    "ai",
+    "agent",
+    "chat",
+    "code review"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RowanHFinch/Codex_for_VS_Code.git"
+  },
+  "homepage": "https://github.com/RowanHFinch/Codex_for_VS_Code#readme",
+  "bugs": {
+    "url": "https://github.com/RowanHFinch/Codex_for_VS_Code/issues"
+  }
+}

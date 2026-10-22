@@ -1,0 +1,20 @@
+node_modules/
+dist/
+*.vsix
+.env
+.env.*
+!.env.example
+.DS_Store
+work/
+.vscode-test/
+
+# Local evidence, credentials and generated output must never enter source releases.
+coverage/
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+.codex/
+private/
+archives/

@@ -137,18 +137,17 @@ try {
   const profileArgs = ['--user-data-dir', join(temp, 'profile'), '--extensions-dir', join(temp, 'extensions')];
   if (process.env.CODEX_TEST_VSIX) {
     const [cli, ...args] = resolveCliArgsFromVSCodeExecutablePath(executable, { reuseMachineInstall: true });
+    const installArgs = [...args, ...profileArgs, '--install-extension', resolve(process.env.CODEX_TEST_VSIX)];
     execFileSync(
-      process.platform === 'win32' ? executable : cli,
-      [
-        ...(process.platform === 'win32' ? [join(dirname(executable), 'resources', 'app', 'out', 'cli.js')] : args),
-        ...profileArgs,
-        '--install-extension',
-        resolve(process.env.CODEX_TEST_VSIX),
-      ],
+      process.platform === 'win32' ? 'cmd.exe' : cli,
+      process.platform === 'win32'
+        ? ['/d', '/s', '/c', `"${[cli, ...installArgs].map(arg => `"${arg}"`).join(' ')}"`]
+        : installArgs,
       {
         encoding: 'utf8',
         timeout: 30_000,
-        env: { ...process.env, ...(process.platform === 'win32' ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
+        windowsVerbatimArguments: process.platform === 'win32',
+        env: process.env,
       },
     );
     developmentPath = join(temp, 'install-harness');

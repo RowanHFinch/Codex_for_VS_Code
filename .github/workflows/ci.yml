@@ -12,6 +12,10 @@ on:
         type: string
         default: '0.152.0'
         description: Codex CLI version for native checks
+      defender_exclusion:
+        type: boolean
+        default: false
+        description: Exclude the runner temp folder from Defender scanning during startup diagnostics
 permissions:
   contents: read
 jobs:
@@ -93,6 +97,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm install --global @openai/codex@${{ inputs.runtime_version || '0.152.0' }}
+      - name: Record Defender state
+        run: |
+          $status = 'AMServiceEnabled','AntivirusEnabled','RealTimeProtectionEnabled','OnAccessProtectionEnabled','IoavProtectionEnabled','BehaviorMonitorEnabled'
+          try { Get-MpComputerStatus | Select-Object $status | ConvertTo-Json -Compress } catch { "DEFENDER STATUS UNAVAILABLE: $($_.Exception.Message)" }
+          if ('${{ inputs.defender_exclusion }}' -eq 'true') {
+            # Diagnostic only: fixtures create their homes under the temp folder, which may be an 8.3 path.
+            $temp = @($env:TEMP, (Get-Item -LiteralPath $env:TEMP).FullName, [IO.Path]::GetTempPath().TrimEnd('\')) | Select-Object -Unique
+            Add-MpPreference -ExclusionPath $temp
+          }
+          Write-Output "DEFENDER EXCLUSIONS: $((Get-MpPreference).ExclusionPath -join ';')"
       - name: Reproduce native startup without retries
         run: |
           foreach ($check in @('test:oauth', 'test:elicitation', 'test:agents')) {

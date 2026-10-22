@@ -1,0 +1,61 @@
+name: Validate preview
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run release:local
+      - run: npm audit --audit-level=high
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: independent-codex-${{ matrix.os }}
+          path: |
+            dist/*.vsix
+            dist/*.sha256
+            dist/release-verification.json
+  editor:
+    env:
+      CODEX_TEST_VSIX: dist/codex-for-vscode-0.9.0.vsix
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run release:local
+      - run: npm install --global @openai/codex@0.152.0
+      - run: npm run test:oauth
+      - run: npm run test:elicitation
+      - run: npm run test:agents
+      - run: npm run test:integrations
+      - run: npm run test:foundation
+      - run: ${{ runner.os == 'Linux' && 'xvfb-run -a npm run test:editor' || 'npm run test:editor' }}
+      - if: runner.os != 'Windows'
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a npm run test:editor' || 'npm run test:editor' }}
+        env:
+          CODEX_EDITOR_UI: '1'
+          CODEX_UI_SIDEBAR: '1'
+      - if: runner.os != 'Windows'
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a npm run test:editor' || 'npm run test:editor' }}
+        env:
+          CODEX_EDITOR_UI: '1'
+          CODEX_UI_MCP: '1'

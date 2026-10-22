@@ -80,6 +80,7 @@ jobs:
     runs-on: windows-latest
     env:
       CODEX_STARTUP_DIAGNOSTICS: '1'
+      CODEX_STARTUP_CONCURRENT: ${{ matrix.worker == 2 && '1' || '0' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -90,10 +91,12 @@ jobs:
       - run: npm install --global @openai/codex@0.152.0
       - name: Reproduce native startup without retries
         run: |
-          for ($i = 1; $i -le 10; $i++) {
-            Write-Output "FULL STARTUP SEQUENCE $i"
-            foreach ($check in @('test:oauth', 'test:elicitation', 'test:agents', 'test:integrations', 'test:foundation')) {
-              npm run $check
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            }
+          foreach ($check in @('test:oauth', 'test:elicitation', 'test:agents')) {
+            npm run $check
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          for ($i = 1; $i -le 100; $i++) {
+            Write-Output "STARTUP ITERATION $i; CONCURRENT=$env:CODEX_STARTUP_CONCURRENT"
+            npm run test:integrations
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }

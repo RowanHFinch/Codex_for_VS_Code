@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, realpath, writeFile, readFile, rm } from 'node:fs/promises';
+import { spawn, execFile } from 'node:child_process';
+import { mkdtemp, mkdir, realpath, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
@@ -13,10 +14,12 @@ async function main() {
     root = join(temp, 'workspace'),
     home = join(temp, 'runtime');
   await Promise.all([mkdir(root), mkdir(home)]);
+  const contexts = new Map([[root, { home, label: 'integration' }]]);
   const original = RuntimeClient.spawn,
     clients: RuntimeClient[] = [];
   // Only these child processes see the empty test home. No real sign-in or user config is copied.
   RuntimeClient.spawn = (executable, args, cwd) => {
+    const context = contexts.get(cwd)!;
     const child = spawn(executable, args, {
       cwd,
       env: {
@@ -25,7 +28,10 @@ async function main() {
         HOME: temp,
         USERPROFILE: temp,
         TMPDIR: process.env.TMPDIR,
-        CODEX_HOME: home,
+        CODEX_HOME: context.home,
+        ...(process.env.CODEX_STARTUP_DIAGNOSTICS === '1'
+          ? { RUST_LOG: 'codex_app_server=debug,codex_state=debug,sqlx=warn' }
+          : {}),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -35,16 +41,56 @@ async function main() {
       const index = clients.length + 1,
         started = Date.now();
       const trace = (event: string, detail: unknown = {}) =>
-        console.log(JSON.stringify({ startup: index, pid: child.pid, ms: Date.now() - started, event, detail }));
+        console.log(
+          JSON.stringify({
+            startup: index,
+            scenario: context.label,
+            pid: child.pid,
+            scriptMs: Math.round(process.uptime() * 1000),
+            ms: Date.now() - started,
+            event,
+            detail,
+          }),
+        );
       let stderr = '';
       let stdoutBytes = 0;
+      const pipeState = () => ({
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+        stdinQueued: child.stdin.writableLength,
+        stdinDestroyed: child.stdin.destroyed,
+        stdoutEnded: child.stdout.readableEnded,
+        stdoutBytes,
+      });
+      const snapshot = async () => {
+        trace('slow-startup', pipeState());
+        trace('home-files', await readdir(context.home).catch(() => []));
+        if (process.platform !== 'win32' || !child.pid) return;
+        try {
+          const { stdout } = await promisify(execFile)(
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              `$p=Get-Process -Id ${child.pid} -ErrorAction Stop; ` +
+                '$p | Select-Object Id,CPU,HandleCount,WorkingSet64,@{n="Threads";e={@($_.Threads | ' +
+                'Select-Object Id,ThreadState,@{n="WaitReason";e={if($_.ThreadState -eq "Wait"){$_.WaitReason}}})}} | ConvertTo-Json -Depth 4 -Compress',
+            ],
+            { timeout: 5000, maxBuffer: 65536, windowsHide: true },
+          );
+          trace('windows-process', JSON.parse(stdout));
+        } catch {
+          trace('windows-process-unavailable');
+        }
+      };
       const frames: unknown[] = [];
       const parsed = new JsonLines(message => {
         frames.push({ id: message.id, method: message.method, result: 'result' in message, error: 'error' in message });
         if (frames.length > 8) frames.shift();
       });
       child.stderr.on('data', data => {
-        stderr = (stderr + data.toString()).slice(-8192);
+        stderr = (stderr + data.toString()).slice(-32768);
       });
       child.once('spawn', () => trace('spawn'));
       child.stdout.once('data', () => trace('first-stdout'));
@@ -62,13 +108,21 @@ async function main() {
       const request = client.request.bind(client);
       client.request = async <T>(method: string, params?: unknown): Promise<T> => {
         const at = Date.now();
+        const slow = method === 'initialize' ? setTimeout(() => void snapshot(), 5000) : undefined;
         try {
-          const result = await request<T>(method, params);
+          const pending = request<T>(method, params);
+          if (method === 'initialize') {
+            trace('initialize-written', pipeState());
+            child.stdin.write('', error => trace('initialize-flushed', { failed: Boolean(error) }));
+          }
+          const result = await pending;
           if (method === 'initialize') trace('initialized', { durationMs: Date.now() - at });
           return result;
         } catch (error) {
-          trace('request-failed', { method, durationMs: Date.now() - at, stdoutBytes, frames, stderr });
+          trace('request-failed', { method, durationMs: Date.now() - at, ...pipeState(), frames, stderr });
           throw error;
+        } finally {
+          clearTimeout(slow);
         }
       };
     }
@@ -123,6 +177,32 @@ async function main() {
       '---\nname: fixture\ndescription: Synthetic isolated integration fixture.\n---\nUse this synthetic fixture only.\n',
     );
     const executable = process.env.CODEX_RUNTIME_PATH || 'codex';
+    if (process.env.CODEX_STARTUP_CONCURRENT === '1') {
+      // Several editor surfaces can connect to the same native home at once.
+      for (const shared of [false, true]) {
+        const roots: string[] = [];
+        for (let i = 0; i < 8; i++) {
+          const workspace = join(temp, `workspace-${shared}-${i}`);
+          const codexHome = join(temp, `runtime-${shared}-${shared ? 0 : i}`);
+          await Promise.all([mkdir(workspace), mkdir(codexHome, { recursive: true })]);
+          contexts.set(workspace, { home: codexHome, label: '' });
+          roots.push(workspace);
+        }
+        for (const phase of ['cold', 'warm']) {
+          const label = `${shared ? 'shared' : 'separate'}-${phase}`;
+          for (const workspace of roots) contexts.set(workspace, { ...contexts.get(workspace)!, label });
+          const connections = await Promise.allSettled(
+            roots.map(workspace => connect(executable, workspace, {}, true)),
+          );
+          const failures = connections.filter(c => c.status === 'rejected');
+          console.log(
+            JSON.stringify({ scenario: label, passed: connections.length - failures.length, failed: failures.length }),
+          );
+          for (const c of connections) if (c.status === 'fulfilled') await c.value.client.shutdown();
+          assert.equal(failures.length, 0, `${label} initialization must succeed without retries`);
+        }
+      }
+    }
     // The production writer: one configuration runtime shared by each write and its readback.
     const control = sharedConnection(() => connect(executable, root, {}, true));
     const writer = {

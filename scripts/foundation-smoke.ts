@@ -56,7 +56,13 @@ async function main() {
       `require('node:fs').appendFileSync(process.argv[2], 'started\\n');process.stdout.write('{"continue":true}');`,
     );
     const command = [process.execPath, join(temp, 'hook.cjs'), log]
-      .map(v => JSON.stringify(process.platform === 'win32' ? v.replaceAll('\\', '/') : v))
+      .map((v, index) =>
+        process.platform === 'win32'
+          ? index === 0
+            ? 'node'
+            : JSON.stringify(v.replaceAll('\\', '/'))
+          : JSON.stringify(v),
+      )
       .join(' ');
     await writeFile(
       join(home, 'hooks.json'),

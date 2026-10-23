@@ -318,4 +318,39 @@ does not retry.
 Regular CI now sets `TEMP`/`TMP` to `RUNNER_TEMP` in the Windows editor job
 before the native and editor checks, so empty test homes are created on `D:`.
 The 30-second RPC deadline, failure assertions and no-retry behavior are
-unchanged. Merge and publication remain blocked.
+unchanged.
+
+#### Current status — supersedes earlier "blocked" notes
+
+Earlier entries in this section are dated records; their "merge blocked" notes
+reflect the evidence at the time. With the Windows editor job using `RUNNER_TEMP`,
+regular CI passed all six jobs twice at `cbafc35`
+([run 39880983973](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39880983973),
+attempts 1 and 2); the slowest Windows integration initialization was 67 ms and
+117 ms respectively. The branch is ready for review and merge through a pull
+request. Publication is a separate decision and has not been performed.
+
+Verified on this branch:
+
+- Closed runtime stdout is handled as a disconnect, with regression tests that
+  fail when the fix is removed.
+- App-server initialization is serialized within one extension host; shared-home
+  cold starts passed 80 of 80 after the change (3 of 8 failed before).
+- In a controlled Windows A/B, moving the empty test homes from the default `C:`
+  temp folder to `RUNNER_TEMP` on `D:` removed every initialization over 2 seconds.
+  Defender on-access scanning was already disabled, and Codex 0.163.0 did not
+  remove the slow path.
+
+Remaining risks and limits:
+
+- The original failed attempt has no trace; the `C:` temp-volume explanation is
+  the strongest supported cause, not a reconstruction of that event. It rests on
+  one A/B pair and two subsequent CI passes, so a recurrence is still possible.
+- Users whose Codex home is on a similarly slow disk can see a first start exceed
+  the 30-second `initialize` deadline. The extension reports this as an unknown
+  outcome and does not retry; it does not yet explain the cause in the UI.
+- The fast native `failed to initialize state runtime` error seen under the
+  four-fixture pressure loop on `C:` is not explained; its OS error was not
+  printed. It did not occur on `D:` or in regular CI.
+- Initialization serialization covers one extension host only, not other VS Code
+  windows, CLI or desktop clients.

@@ -284,3 +284,34 @@ home is a candidate, not a verified cause.
 Remaining candidates for the slow path are disk throughput or flush latency of
 the temp volume (`C:`, the OS disk) during SQLite creation and migration, and
 host contention. Merge and publication remain blocked.
+
+#### Temp-volume A/B — slow path isolated to the `C:` temp folder
+
+Commit `2a31608` added a `temp_on_runner_temp` input that sets `TEMP`/`TMP` to
+`RUNNER_TEMP` for the diagnostic steps. Both runs used Codex 0.152.0; each job
+printed Node's `os.tmpdir()` before the fixtures ran.
+
+| Fixture temp folder | Run | Four-fixture pressure worker | Sequential + shared/separate worker |
+| --- | --- | --- | --- |
+| `C:\Users\RUNNER~1\AppData\Local\Temp` (default) | [39879557562](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39879557562) | **Failed:** 271 inits, p50 769 ms, max 3.2 s, 29 over 2 s; then the native state-runtime initialization error after 952 ms | Passed in 8 min: 205 inits, p50 443 ms, max 3.9 s, 23 over 2 s |
+| `D:\a\_temp` (`RUNNER_TEMP`) | [39879567810](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39879567810) | Passed: 900 inits (all 25 batches), p50 395 ms, max 1.4 s, **0 over 2 s** | Passed in 2 min: 205 inits, p50 56 ms, max 0.85 s, **0 over 2 s** |
+
+Across all earlier Windows diagnostics, every run used the default `C:` temp
+folder and showed multi-second cold starts; this is the first configuration with
+none. The D: run also had no fast native initialization error. This is one pair
+of runs on different runner instances, but the effect is large and consistent
+across both workers.
+
+Conclusion: the original 30-second `initialize` timeout is best explained by the
+native runtime creating and migrating its SQLite databases on the slow `C:` OS
+volume of GitHub-hosted Windows runners, where the empty test homes live by
+default. The process was still progressing, not deadlocked. This is a property
+of the CI host's temp volume, not of the extension's request handling, and
+neither Defender nor the upstream SQLite connection fixes explain it. A failing
+trace of the original attempt is still unavailable, so this remains the
+strongest supported explanation rather than a reconstruction of that event.
+
+Users whose Codex home is on a similarly slow disk could also see a first start
+exceed 30 seconds; the extension still reports that as an unknown outcome and
+does not retry. Regular CI has **not** yet been changed to use `RUNNER_TEMP`.
+Merge and publication remain blocked.

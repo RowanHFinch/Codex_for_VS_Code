@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import { join } from 'node:path';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, realpath, writeFile } from 'node:fs/promises';
 
 type Frame = { sessionId: string; contextId?: number };
 class Cdp {
@@ -608,11 +608,15 @@ export async function nativeUiTests(root: string) {
       await until(
         () =>
           read(
-            `document.querySelector('.model-picker > button')?.textContent.toLowerCase().includes('gpt-5.6')&&!document.querySelector('.model-picker > button').disabled`,
+            `!document.querySelector('.model-option')&&document.querySelector('.model-picker > button')?.textContent.toLowerCase().includes('gpt-5.6')&&!document.querySelector('.model-picker > button').disabled`,
           ),
         'Explicit live model not selected',
       );
       if (!(await read(`Boolean(document.querySelector('input[aria-label="Reasoning"]'))`))) await click('Model');
+      await until(
+        () => read(`Boolean(document.querySelector('input[aria-label="Reasoning"]'))`),
+        'Reasoning control did not open',
+      );
       const effortName = effort[0].toUpperCase() + effort.slice(1);
       let found = false;
       const maximum = Number(await read(`document.querySelector('input[aria-label="Reasoning"]').max`));
@@ -801,9 +805,9 @@ export async function nativeUiTests(root: string) {
       await until(
         () =>
           read(
-            `Boolean(document.querySelector('.conversation-title'))&&!document.querySelector('[aria-label="New chat tab"]')?.disabled`,
+            `Boolean(document.querySelector('textarea'))&&!document.querySelector('textarea').disabled&&!document.querySelector('.model-picker > button')?.disabled`,
           ),
-        'Initial owned chat did not start',
+        'Initial draft did not become ready',
       ).catch(async error => {
         throw new Error(
           error.message + ': ' + (await read(`document.querySelector('[role=alert]')?.textContent||'No host error'`)),
@@ -828,9 +832,9 @@ export async function nativeUiTests(root: string) {
       await until(
         () =>
           read(
-            `Boolean(document.querySelector('.conversation-title'))&&!document.querySelector('[aria-label="New chat tab"]')?.disabled`,
+            `Boolean(document.querySelector('textarea'))&&!document.querySelector('textarea').disabled&&!document.querySelector('.model-picker > button')?.disabled`,
           ),
-        'Second owned chat did not finish loading',
+        'Second draft did not become ready',
         30000,
       );
       await chooseLiveModel();
@@ -857,6 +861,7 @@ export async function nativeUiTests(root: string) {
       `(()=>{const e=document.querySelector('.group-assignment select');e.value=e.options[1].value;e.dispatchEvent(new Event('change',{bubbles:true}));return true})()`,
     );
     await until(() => read(`Boolean(document.querySelector('.group-members .session'))`), 'Group assignment failed');
+    await click('Chat');
     if (!live) {
       await click('Ecosystem');
       await until(
@@ -978,7 +983,60 @@ export async function nativeUiTests(root: string) {
         false,
       );
       await until(
-        () => read(`!document.querySelector('.tab-status.starting,.tab-status.running,.tab-status.waiting')`),
+        async () => {
+          if (await read(`Boolean(document.querySelector('.session-tab:first-child .tab-status.waiting'))`)) {
+            // Proposed diffs can hide the chat; hidden webviews defer rendering new approvals.
+            const chatTab = await cdp.evaluate(
+              workbench,
+              `(()=>{const e=[...document.querySelectorAll('.tabs-container .tab')].find(e=>e.textContent==='Codex for VS Code');const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`,
+            );
+            for (const type of ['mousePressed', 'mouseReleased'])
+              await cdp.request(
+                'Input.dispatchMouseEvent',
+                { type, ...chatTab, button: 'left', clickCount: 1 },
+                workbench.sessionId,
+              );
+            await read(`document.querySelectorAll('[role=tab]')[0].click()`);
+            const approval = await until(
+              () =>
+                read(
+                  `(()=>{const card=document.querySelector('.decision.approval');return card&&{command:card.querySelector('.command')?.textContent,paths:[...card.querySelectorAll('.change-path')].map(e=>e.textContent)}})()`,
+                ),
+              'Fixture approval did not appear',
+            ).catch(async error => {
+              throw new Error(
+                error.message +
+                  ': ' +
+                  JSON.stringify(
+                    await read(
+                      `({visible:document.visibilityState,cards:[...document.querySelectorAll('.decision')].map(e=>e.textContent),error:document.querySelector('[role=alert]')?.textContent,status:[...document.querySelectorAll('.tab-status')].map(e=>e.className)})`,
+                    ),
+                  ),
+              );
+            });
+            if (approval.command) {
+              const command = approval.command.slice(2);
+              const body = /^\/bin\/(?:zsh|bash|sh) -l?c (['"])(.*)\1$/.exec(command)?.[2] ?? command;
+              const skill = '.agents/skills/native-fixture/SKILL.md';
+              const reads = [skill, join(root, skill), join(await realpath(root), skill)].flatMap(path =>
+                [path, `'${path}'`, `"${path}"`].flatMap(quoted =>
+                  ['cat', '/bin/cat', "sed -n '1,200p'"].map(reader => `${reader} ${quoted}`),
+                ),
+              );
+              assert.ok(
+                ['sleep 5', '/bin/sleep 5', ...reads].includes(body),
+                'Unexpected fixture command: ' + approval.command,
+              );
+              await click('Allow once');
+            } else {
+              assert.deepEqual(approval.paths, ['native-agent.txt']);
+              await assert.rejects(readFile(join(root, 'native-agent.txt')), { code: 'ENOENT' });
+              await click('Accept');
+            }
+            await read(`document.querySelectorAll('[role=tab]')[1].click()`);
+          }
+          return read(`!document.querySelector('.tab-status.starting,.tab-status.running,.tab-status.waiting')`);
+        },
         'Model turns did not finish',
         120000,
       );
@@ -1006,7 +1064,7 @@ export async function nativeUiTests(root: string) {
         alpha,
         'The Max native Agent must perform the real disposable file edit',
       );
-      assert.equal(await read(`document.querySelector('[aria-label="Reasoning"]')?.value`), 'max');
+      assert.ok(await read(`document.querySelector('.model-picker > button')?.textContent.includes('Max')`));
       for (const index of [0, 1]) {
         await read(`document.querySelectorAll('[role=tab]')[${index}].click()`);
         await until(

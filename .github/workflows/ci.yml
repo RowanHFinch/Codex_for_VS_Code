@@ -3,10 +3,28 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      startup_diagnostics:
+        type: boolean
+        default: false
+        description: Run isolated Windows startup reproduction
+      runtime_version:
+        type: string
+        default: '0.152.0'
+        description: Codex CLI version for native checks
+      defender_exclusion:
+        type: boolean
+        default: false
+        description: Exclude the runner temp folder from Defender scanning during startup diagnostics
+      temp_on_runner_temp:
+        type: boolean
+        default: false
+        description: Place startup diagnostic fixtures under RUNNER_TEMP instead of the default temp folder
 permissions:
   contents: read
 jobs:
   offline:
+    if: ${{ !inputs.startup_diagnostics }}
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +47,7 @@ jobs:
             dist/*.sha256
             dist/release-verification.json
   editor:
+    if: ${{ !inputs.startup_diagnostics }}
     env:
       CODEX_TEST_VSIX: dist/codex-for-vscode-0.9.0.vsix
     strategy:
@@ -44,11 +63,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run release:local
-      - run: npm install --global @openai/codex@0.152.0
+      - run: npm install --global @openai/codex@${{ inputs.runtime_version || '0.152.0' }}
+      # The default Windows temp folder is on the slow C: OS volume; native cold starts
+      # creating SQLite state there exceeded the 30-second initialize deadline.
+      - if: runner.os == 'Windows'
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - run: npm run test:oauth
       - run: npm run test:elicitation
       - run: npm run test:agents
       - run: npm run test:integrations
+        env:
+          CODEX_STARTUP_DIAGNOSTICS: '1'
       - run: npm run test:foundation
       - run: ${{ runner.os == 'Linux' && 'xvfb-run -a npm run test:editor' || 'npm run test:editor' }}
       - if: runner.os != 'Windows'
@@ -61,3 +88,64 @@ jobs:
         env:
           CODEX_EDITOR_UI: '1'
           CODEX_UI_MCP: '1'
+  windows-startup:
+    if: ${{ inputs.startup_diagnostics }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: [1, 2]
+    runs-on: windows-latest
+    env:
+      CODEX_STARTUP_DIAGNOSTICS: '1'
+      CODEX_STARTUP_CONCURRENT: ${{ matrix.worker == 2 && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm install --global @openai/codex@${{ inputs.runtime_version || '0.152.0' }}
+      - name: Record Defender state
+        run: |
+          $status = 'AMServiceEnabled','AntivirusEnabled','RealTimeProtectionEnabled','OnAccessProtectionEnabled','IoavProtectionEnabled','BehaviorMonitorEnabled'
+          try { Get-MpComputerStatus | Select-Object $status | ConvertTo-Json -Compress } catch { "DEFENDER STATUS UNAVAILABLE: $($_.Exception.Message)" }
+          if ('${{ inputs.defender_exclusion }}' -eq 'true') {
+            # Diagnostic only: fixtures create their homes under the temp folder, which may be an 8.3 path.
+            $temp = @($env:TEMP, (Get-Item -LiteralPath $env:TEMP).FullName, [IO.Path]::GetTempPath().TrimEnd('\')) | Select-Object -Unique
+            Add-MpPreference -ExclusionPath $temp
+          }
+          Write-Output "DEFENDER EXCLUSIONS: $((Get-MpPreference).ExclusionPath -join ';')"
+      - if: ${{ inputs.temp_on_runner_temp }}
+        name: Move fixture temp folder to RUNNER_TEMP
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+      - name: Record fixture temp folder
+        run: node -p "require('os').tmpdir()"
+      - name: Reproduce native startup without retries
+        run: |
+          foreach ($check in @('test:oauth', 'test:elicitation', 'test:agents')) {
+            npm run $check
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $rounds = if ($env:CODEX_STARTUP_CONCURRENT -eq '1') { 5 } else { 25 }
+          for ($i = 1; $i -le $rounds; $i++) {
+            Write-Output "STARTUP ITERATION $i; CONCURRENT=$env:CODEX_STARTUP_CONCURRENT"
+            if ($env:CODEX_STARTUP_CONCURRENT -eq '1') {
+              npm run test:integrations
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            } else {
+              $children = 1..4 | ForEach-Object {
+                Start-Process node.exe -ArgumentList @('node_modules/tsx/dist/cli.mjs', 'scripts/integration-smoke.ts') -NoNewWindow -PassThru
+              }
+              $failed = $false
+              foreach ($child in $children) {
+                $child.WaitForExit()
+                if ($child.ExitCode -ne 0) { $failed = $true }
+                $child.Dispose()
+              }
+              if ($failed) { exit 1 }
+            }
+          }

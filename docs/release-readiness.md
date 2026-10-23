@@ -81,3 +81,276 @@ archive allowlist, licenses and digest; it does not replace functional tests.
   `a548dcb274be00df4cdf080745826e530490d0a21ab8ff3e3b87379d4cc0a2d9`.
 - The release tag remains fixed at the tested source commit; this later document
   update records publication results without rebuilding or replacing version 0.9.0.
+
+## Windows startup investigation — unreleased changes
+
+The first attempt of [run 39813431545](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39813431545/attempts/1)
+failed in the native Windows integration fixture with a 30-second `initialize`
+timeout. Its successful second attempt does not establish a root cause or fix.
+The failed attempt did not record process sequence, stdout EOF or frame metadata;
+`#1` is the first request of each process, not necessarily the first startup in the script.
+
+Two Windows workers each completed 30 integration iterations in
+[run 39815387737](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39815387737).
+Two more each completed 10 full OAuth/form/agent/integration/Hook sequences in
+[run 39816894588](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39816894588).
+Together these instrumented 720 integration-fixture initializations with the
+original transport, all below one second (maximum 983 ms). No request was retried.
+This did not reproduce the original timeout. The failed runner used image
+`20261018.275.1`; the stress runners used `20261021.278.1`, so these are not an
+identical-host reproduction. macOS also passed 20 iterations / 180 initializations.
+
+A separate fault-injection test did reproduce a client defect: if stdout ends
+while the child remains alive, pending work was reported as a timeout and the
+connection still accepted new sends. The client now handles EOF as a disconnect,
+rejects pending delivery as unknown, and refuses subsequent sends. Regression
+tests verify the still-running child case and a complete final reply immediately
+followed by EOF. They inject EOF at the client's readable stream boundary; this
+does not certify Windows child-process handle closure. Removing the fix makes
+both tests fail. A focused independent review checked frame ordering and no replay.
+This is a confirmed fix for that failure mode, **not proof of the original CI cause**.
+
+Regular integration CI now records process lifecycle and bounded frame summaries
+without request/result payloads. Failure-only stderr capture is confined to the
+empty-home synthetic fixture. Earlier manual `startup_diagnostics` runs exercised
+full native sequences on two Windows runners, failing on errors without retries.
+The original timeout remains unresolved until a failing trace identifies its cause;
+neither increasing timeouts nor rerunning to green is considered a resolution.
+
+### Controlled cold-start contention — 2026-10-22
+
+The comparison in [run 39821433265](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39821433265)
+used the same Windows runner, Codex 0.152.0 and eight simultaneous `connect()` calls:
+
+| Native homes | First initialization | Subsequent initialization |
+| --- | --- | --- |
+| Eight separate homes | 8 passed | 8 passed |
+| One shared home | 5 passed, 3 failed | 8 passed |
+
+The failed shared-home processes reported native SQLite initialization errors and
+closed stdout before returning any protocol frame (254–636 ms). Initialization
+bytes had already flushed. An earlier Windows run also failed 3 of 8 shared cold
+starts; five macOS controls failed only the shared cold case, with all other
+cases passing. This isolates a native first-start concurrency defect, but its
+early process exit is **not the original 30-second timeout**.
+
+The extension now serializes spawn, handshake and startup configuration checks
+within one extension host. Failed starts await the existing bounded shutdown
+before releasing the queue; failures do not poison the queue or trigger retries.
+Already connected clients' ordinary RPC calls do not acquire this queue. This
+does not coordinate other VS Code windows, CLI/desktop clients or repair native
+database state. Shutdown waits at most three seconds, not indefinitely for OS exit.
+
+The focused regression failed before the fix (four simultaneous initializations)
+and passed after it (one), also checking recovery after failure and independent
+live RPC. Local strict types, 221 tests and build passed; all six regular CI jobs
+passed at `2845e46` in [run 39822316493](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39822316493).
+
+The unmodified sequential Windows reproduction additionally completed 100 fresh
+homes / 901 initializations. Two first starts took 9.8 and 10.9 seconds. At five
+seconds they had flushed input but emitted no stdout; the file snapshots showed
+SQLite database/journal creation. This narrows the observed slow path but does
+not prove the original timeout's cause. A separate four-fixture pressure run
+completed 922 initializations, with a 17.9-second maximum and no failed request.
+Slow-start diagnostics now also read only the temporary database's backfill status and retain ten seconds of observation
+after a failed deadline, without resending or accepting the late result as a pass.
+
+The diagnostic workflow compares cold/warm, shared/separate homes and runs four
+independent integration fixtures concurrently. It preserves any failure rather
+than retrying it. These changes remain on the investigation branch; no new
+Marketplace version or release tag has been published.
+
+The post-queue four-fixture pressure worker in
+[run 39822319336](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39822319336)
+completed 935 initializations (maximum 9.25 seconds). Its 22 slow-start snapshots
+included 17 completed backfills, one pending backfill and four unavailable reads;
+none captured a running backfill. These samples therefore do not support blaming
+all observed delays on a stuck backfill lease. Process snapshots succeeded three
+times and were unavailable 19 times; future failures record only the helper's
+error code, kill flag and signal, without command output or environment contents.
+Different runners and instrumentation prevent treating the two maxima as a
+controlled performance improvement.
+
+An isolated macOS Codex 0.152.0 fault injection confirmed one possible 30-second
+failure mechanism: a fresh successful startup took 210 ms; changing only the
+fixture's backfill row to an unexpired `running` lease caused no protocol response
+and native exit after 30,117 ms with an explicit backfill-wait error; restoring the
+original row restored initialization in 63 ms. This modified only a disposable
+fixture, never a user's database. It validates that diagnostic signature, **not
+that the original Windows CI failure had that cause**. The extension must not
+reset native database leases or replay requests based on this hypothesis.
+
+The same run's controlled worker completed ten of each cold/warm, shared/separate
+case: 80 initializations per case, all successful. In total it recorded 407
+successful initializations (maximum 4.10 seconds), then the 15-minute **job**
+limit canceled the worker during the tenth iteration's ordinary integration
+sequence. One pending initialization was interrupted by cancellation, not observed
+to reach its request deadline. This is partial evidence, not a fully passed
+20-iteration run. The manual shared-home loop is now bounded to five iterations
+to fit the existing job budget; the 30-second RPC deadline and failure assertions
+remain unchanged. The four-independent-fixture pressure loop remains 25 batches.
+
+Merge and publication remain blocked on the original timeout investigation.
+The original runner is gone and lacked a failure trace; newer-runner green jobs,
+controlled cold-start fixes and injected faults cannot reconstruct that event.
+
+### Upstream SQLite startup hypothesis and runtime A/B — 2026-10-22
+
+Source review of the pinned runtime identified a native mechanism that matches
+the original failure better than the cold-start concurrency defect. The failed
+attempt timed out on the **first** `initialize` of a single fresh home about 31.5
+seconds after the fixture started; no other client shared that home.
+
+In `rust-v0.152.0` (tagged 2026-09-01), every new connection in a writable state
+pool (up to five per database) applied `journal_mode=WAL` and
+`auto_vacuum=INCREMENTAL` through SQLx connect options, with a five-second
+`busy_timeout`. Upstream later documented that the vacuum setter takes the writer
+lock even when unchanged, so a connection opened while another holds a write
+transaction can wait and fail; SQLx then retries connection setup and reports
+`PoolTimedOut` after its default 30-second acquire timeout
+([openai/codex#49032](https://github.com/openai/codex/pull/49032),
+[openai/codex#49102](https://github.com/openai/codex/pull/49102)). State database
+initialization runs before the app-server answers `initialize`. Separately, a
+failed `mark_backfill_complete` write in 0.152.0 is only logged, leaving a fresh
+900-second `running` lease owned by the same process; the startup gate then waits
+its 30-second limit and exits (the signature reproduced by fault injection above).
+
+The Windows evidence above is consistent with this: slow first starts of 9.8,
+10.9, 17.9 and 9.25 seconds produced no stdout while SQLite files were being
+created, close to multiples of the five-second busy timeout. Both upstream fixes
+first ship in Codex 0.160.0; local macOS runs of the OAuth, form, agent,
+integration and foundation fixtures pass on 0.163.0.
+
+#### Windows A/B result: hypothesis not supported
+
+Commit `df18cdb` ran all six regular jobs on 0.163.0 successfully
+([run 39826596405](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39826596405)).
+The same `startup_diagnostics` workflow then ran with each runtime:
+
+| Runtime | Run | Four-fixture pressure worker | Sequential + shared/separate worker |
+| --- | --- | --- | --- |
+| 0.152.0 | [39826605438](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39826605438) | **Failed:** 144 inits, then four simultaneous 30 s `initialize` timeouts | Passed: 205 inits, max 11.4 s, 4 over 5 s |
+| 0.163.0 | [39826666515](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39826666515) | **Failed:** 427 inits (max 7.2 s), then a native SQLite state-runtime initialization error after 72 ms | Passed: 205 inits, max 10.8 s, 11 over 5 s |
+
+The 0.152.0 failure reproduces the original signature on a single fresh home
+per fixture: zero stdout bytes and no exit at 30 seconds. Its diagnostics show
+the process was **progressing, not deadlocked**: file snapshots advanced through
+`state_5`, `logs_2`, `goals_1` and `memories_1` creation (about 5–10 seconds per
+database, with rollback-journal files present), the backfill row was still
+`pending`, and two processes logged normal app-server startup about 44 seconds
+after spawn. In the pressure worker, the four independent fixtures repeatedly
+slowed down by nearly identical amounts in the same batch, which points to a
+host-wide file I/O bottleneck rather than a per-process lock.
+
+0.163.0 still showed multi-second cold starts of the same shape, so the upstream
+SQLite connection-setup fixes do not remove this slow path, and the per-connection
+writer-lock explanation above is **not supported** as the cause. CI therefore
+stays on 0.152.0 by default; `runtime_version` remains available for comparisons.
+The 0.163.0 pressure failure (separate homes, immediate native error) is a further
+sign of file-level interference during SQLite creation; its underlying OS error
+was not printed by the runtime.
+
+Current conclusion: the original timeout is a native cold start that exceeded 30
+seconds while creating its SQLite databases under slow Windows file I/O. What
+slows file creation on the runner (for example real-time antivirus scanning of
+new database and journal files, or disk throughput) is **not yet identified**.
+Merge and publication remain blocked.
+
+#### Defender A/B — hypothesis rejected
+
+Commit `8c7a753` added a `defender_exclusion` input that records Defender state
+and can add the runner temp folder (long and 8.3 forms) as a scan exclusion.
+Both runs used Codex 0.152.0. Every worker reported
+`RealTimeProtectionEnabled=false`, `OnAccessProtectionEnabled=false` and existing
+exclusions `C:\;D:\` **before** any change, so on-access scanning was not active
+on these runners and the added exclusion was redundant.
+
+| Exclusion | Run | Four-fixture pressure worker | Sequential + shared/separate worker |
+| --- | --- | --- | --- |
+| No | [39828859593](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39828859593) | **Failed:** 432 inits, max 2.9 s, 24 over 2 s; then a native state-runtime initialization error after 1.1 s | Passed: 205 inits, max 4.3 s, 16 over 2 s |
+| Yes | [39828875341](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39828875341) | Passed: 900 inits (all 25 batches), max 7.6 s, 4 over 5 s, 38 over 2 s | Canceled by the 15-minute job limit after 205 inits, max 8.1 s, 11 over 5 s |
+
+The exclusion did not reduce slow cold starts; variance between runners exceeds
+any difference between the two settings. Real-time antivirus scanning is therefore
+**not** the cause of the slow SQLite creation on GitHub-hosted Windows runners.
+
+The fast native error (`failed to initialize state runtime`, no inner cause
+printed) now appeared on both 0.152.0 and 0.163.0. In this run it was the ninth
+process of one fixture, against an already initialized home, so it is not a
+first-creation race. The fixture stops a runtime and starts the next one without
+waiting for the old process to exit; overlap with an exiting process on the same
+home is a candidate, not a verified cause.
+
+Remaining candidates for the slow path are disk throughput or flush latency of
+the temp volume (`C:`, the OS disk) during SQLite creation and migration, and
+host contention. Merge and publication remain blocked.
+
+#### Temp-volume A/B — slow path isolated to the `C:` temp folder
+
+Commit `2a31608` added a `temp_on_runner_temp` input that sets `TEMP`/`TMP` to
+`RUNNER_TEMP` for the diagnostic steps. Both runs used Codex 0.152.0; each job
+printed Node's `os.tmpdir()` before the fixtures ran.
+
+| Fixture temp folder | Run | Four-fixture pressure worker | Sequential + shared/separate worker |
+| --- | --- | --- | --- |
+| Default `%TEMP%` on `C:` | [39879557562](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39879557562) | **Failed:** 271 inits, p50 769 ms, max 3.2 s, 29 over 2 s; then the native state-runtime initialization error after 952 ms | Passed in 8 min: 205 inits, p50 443 ms, max 3.9 s, 23 over 2 s |
+| `RUNNER_TEMP` on `D:` | [39879567810](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39879567810) | Passed: 900 inits (all 25 batches), p50 395 ms, max 1.4 s, **0 over 2 s** | Passed in 2 min: 205 inits, p50 56 ms, max 0.85 s, **0 over 2 s** |
+
+Across all earlier Windows diagnostics, every run used the default `C:` temp
+folder and showed multi-second cold starts; this is the first configuration with
+none. The D: run also had no fast native initialization error. This is one pair
+of runs on different runner instances, but the effect is large and consistent
+across both workers.
+
+Conclusion: the original 30-second `initialize` timeout is best explained by the
+native runtime creating and migrating its SQLite databases on the slow `C:` OS
+volume of GitHub-hosted Windows runners, where the empty test homes live by
+default. The process was still progressing, not deadlocked. This is a property
+of the CI host's temp volume, not of the extension's request handling, and
+neither Defender nor the upstream SQLite connection fixes explain it. A failing
+trace of the original attempt is still unavailable, so this remains the
+strongest supported explanation rather than a reconstruction of that event.
+
+Users whose Codex home is on a similarly slow disk could also see a first start
+exceed 30 seconds; the extension still reports that as an unknown outcome and
+does not retry.
+
+Regular CI now sets `TEMP`/`TMP` to `RUNNER_TEMP` in the Windows editor job
+before the native and editor checks, so empty test homes are created on `D:`.
+The 30-second RPC deadline, failure assertions and no-retry behavior are
+unchanged.
+
+#### Current status — supersedes earlier "blocked" notes
+
+Earlier entries in this section are dated records; their "merge blocked" notes
+reflect the evidence at the time. With the Windows editor job using `RUNNER_TEMP`,
+regular CI passed all six jobs twice at `cbafc35`
+([run 39880983973](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39880983973),
+attempts 1 and 2); the slowest Windows integration initialization was 67 ms and
+117 ms respectively. The branch is ready for review and merge through a pull
+request. Publication is a separate decision and has not been performed.
+
+Verified on this branch:
+
+- Closed runtime stdout is handled as a disconnect, with regression tests that
+  fail when the fix is removed.
+- App-server initialization is serialized within one extension host; shared-home
+  cold starts passed 80 of 80 after the change (3 of 8 failed before).
+- In a controlled Windows A/B, moving the empty test homes from the default `C:`
+  temp folder to `RUNNER_TEMP` on `D:` removed every initialization over 2 seconds.
+  Defender on-access scanning was already disabled, and Codex 0.163.0 did not
+  remove the slow path.
+
+Remaining risks and limits:
+
+- The original failed attempt has no trace; the `C:` temp-volume explanation is
+  the strongest supported cause, not a reconstruction of that event. It rests on
+  one A/B pair and two subsequent CI passes, so a recurrence is still possible.
+- Users whose Codex home is on a similarly slow disk can see a first start exceed
+  the 30-second `initialize` deadline. The extension reports this as an unknown
+  outcome and does not retry; it does not yet explain the cause in the UI.
+- The fast native `failed to initialize state runtime` error seen under the
+  four-fixture pressure loop on `C:` is not explained; its OS error was not
+  printed. It did not occur on `D:` or in regular CI.
+- Initialization serialization covers one extension host only, not other VS Code
+  windows, CLI or desktop clients.

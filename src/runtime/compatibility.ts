@@ -13,6 +13,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const exec = promisify(execFile);
+// Concurrent app-server cold starts can race while migrating the same native SQLite home.
+let initializing = Promise.resolve();
 export const TESTED_RUNTIME = '0.152.0';
 /** Oldest app-server protocol this client was built against; newer releases are additive in practice. */
 export const MINIMUM_RUNTIME = '0.152.0';
@@ -86,30 +88,37 @@ export async function connect(
   // Metadata connections create no thread. Thread policy belongs to the chosen workflow. Provider and
   // sign-in follow the user's own Codex configuration, as other Codex clients do.
   const args = ['app-server', '--listen', 'stdio://'];
-  async function start(extra: string[]) {
-    const client = RuntimeClient.spawn(executable, [...args, ...extra], cwd);
-    try {
-      const initialized = await client.request<InitializeResponse>('initialize', {
-        clientInfo: { name: 'independent_codex_vscode', title: 'Codex for VS Code', version: extensionVersion },
-        capabilities: { experimentalApi: true, requestAttestation: false },
-      });
-      client.notify('initialized');
-      const codexHome = await realpath(initialized.codexHome);
-      if (within(cwd, codexHome) || within(codexHome, cwd))
-        throw new Error(
-          'Codex home and the workspace must use separate directories to protect runtime configuration and credentials.',
-        );
-      // With `cwd` the read includes the workspace's own `.codex/config.toml`; without it, project MCP
-      // servers were invisible here and connected in every thread without a workspace grant.
-      const { config } = await client.request<{ config: Record<string, any> }>('config/read', {
-        includeLayers: false,
-        cwd,
-      });
-      return { client, version, codexHome, config, policyArgs: extra };
-    } catch (error) {
-      client.stop();
-      throw error;
-    }
+  function start(extra: string[]) {
+    const starting = initializing.then(async () => {
+      const client = RuntimeClient.spawn(executable, [...args, ...extra], cwd);
+      try {
+        const initialized = await client.request<InitializeResponse>('initialize', {
+          clientInfo: { name: 'independent_codex_vscode', title: 'Codex for VS Code', version: extensionVersion },
+          capabilities: { experimentalApi: true, requestAttestation: false },
+        });
+        client.notify('initialized');
+        const codexHome = await realpath(initialized.codexHome);
+        if (within(cwd, codexHome) || within(codexHome, cwd))
+          throw new Error(
+            'Codex home and the workspace must use separate directories to protect runtime configuration and credentials.',
+          );
+        // With `cwd` the read includes the workspace's own `.codex/config.toml`; without it, project MCP
+        // servers were invisible here and connected in every thread without a workspace grant.
+        const { config } = await client.request<{ config: Record<string, any> }>('config/read', {
+          includeLayers: false,
+          cwd,
+        });
+        return { client, version, codexHome, config, policyArgs: extra };
+      } catch (error) {
+        await client.shutdown();
+        throw error;
+      }
+    });
+    initializing = starting.then(
+      () => {},
+      () => {},
+    );
+    return starting;
   }
   let connection = await start([]);
   const servers = Object.keys(connection.config.mcp_servers ?? {});

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, realpath, writeFile, readFile, rm } from 'node:fs/promises';
+import { spawn, execFile } from 'node:child_process';
+import { mkdtemp, mkdir, realpath, writeFile, readFile, readdir, stat, rm } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
-import { RuntimeClient } from '../src/runtime/client';
+import { DeliveryError, JsonLines, RuntimeClient } from '../src/runtime/client';
 import { connect, sharedConnection } from '../src/runtime/compatibility';
 import { Integrations, mcpFingerprint } from '../src/integrations';
 
@@ -13,24 +14,152 @@ async function main() {
     root = join(temp, 'workspace'),
     home = join(temp, 'runtime');
   await Promise.all([mkdir(root), mkdir(home)]);
+  const contexts = new Map([[root, { home, label: 'integration' }]]);
   const original = RuntimeClient.spawn,
     clients: RuntimeClient[] = [];
   // Only these child processes see the empty test home. No real sign-in or user config is copied.
   RuntimeClient.spawn = (executable, args, cwd) => {
-    const client = new RuntimeClient(
-      spawn(executable, args, {
-        cwd,
-        env: {
-          PATH: process.env.PATH,
-          SystemRoot: process.env.SystemRoot,
-          HOME: temp,
-          USERPROFILE: temp,
-          TMPDIR: process.env.TMPDIR,
-          CODEX_HOME: home,
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }),
-    );
+    const context = contexts.get(cwd)!;
+    const child = spawn(executable, args, {
+      cwd,
+      env: {
+        PATH: process.env.PATH,
+        SystemRoot: process.env.SystemRoot,
+        HOME: temp,
+        USERPROFILE: temp,
+        TMPDIR: process.env.TMPDIR,
+        CODEX_HOME: context.home,
+        ...(process.env.CODEX_STARTUP_DIAGNOSTICS === '1'
+          ? { RUST_LOG: 'codex_app_server=debug,codex_state=debug,sqlx=warn' }
+          : {}),
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const client = new RuntimeClient(child);
+    if (process.env.CODEX_STARTUP_DIAGNOSTICS === '1') {
+      // This fixture always uses an empty home and synthetic services; never trace a user's runtime.
+      const index = clients.length + 1,
+        started = Date.now();
+      const trace = (event: string, detail: unknown = {}) =>
+        console.log(
+          JSON.stringify({
+            startup: index,
+            scenario: context.label,
+            pid: child.pid,
+            scriptMs: Math.round(process.uptime() * 1000),
+            ms: Date.now() - started,
+            event,
+            detail,
+          }),
+        );
+      let stderr = '';
+      let stdoutBytes = 0;
+      const pipeState = () => ({
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+        stdinQueued: child.stdin.writableLength,
+        stdinDestroyed: child.stdin.destroyed,
+        stdoutEnded: child.stdout.readableEnded,
+        stdoutBytes,
+      });
+      const snapshot = async () => {
+        trace('slow-startup', pipeState());
+        const files = await readdir(context.home).catch(() => []);
+        trace(
+          'home-files',
+          await Promise.all(
+            files.map(async name => {
+              const info = await stat(join(context.home, name)).catch(() => undefined);
+              return { name, size: info?.size, modified: info?.mtime.toISOString() };
+            }),
+          ),
+        );
+        try {
+          const { DatabaseSync } = await import('node:sqlite');
+          const db = new DatabaseSync(join(context.home, 'state_5.sqlite'), { readOnly: true });
+          try {
+            trace(
+              'backfill-state',
+              db.prepare('SELECT status, updated_at, last_success_at FROM backfill_state WHERE id=1').get(),
+            );
+          } finally {
+            db.close();
+          }
+        } catch {
+          trace('backfill-state-unavailable');
+        }
+        if (process.platform !== 'win32' || !child.pid) return;
+        try {
+          const { stdout } = await promisify(execFile)(
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              `$p=Get-Process -Id ${child.pid} -ErrorAction Stop; ` +
+                '$p | Select-Object Id,CPU,HandleCount,WorkingSet64,@{n="Threads";e={@($_.Threads | ' +
+                'Select-Object Id,ThreadState,@{n="WaitReason";e={if($_.ThreadState -eq "Wait"){$_.WaitReason}}})}} | ConvertTo-Json -Depth 4 -Compress',
+            ],
+            { timeout: 5000, maxBuffer: 65536, windowsHide: true },
+          );
+          trace('windows-process', JSON.parse(stdout));
+        } catch (error) {
+          const failure = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string };
+          trace('windows-process-unavailable', {
+            code: failure.code,
+            killed: failure.killed,
+            signal: failure.signal,
+          });
+        }
+      };
+      const frames: unknown[] = [];
+      const parsed = new JsonLines(message => {
+        frames.push({ id: message.id, method: message.method, result: 'result' in message, error: 'error' in message });
+        if (frames.length > 8) frames.shift();
+      });
+      child.stderr.on('data', data => {
+        stderr = (stderr + data.toString()).slice(-32768);
+      });
+      child.once('spawn', () => trace('spawn'));
+      child.stdout.once('data', () => trace('first-stdout'));
+      child.stdout.on('data', data => {
+        stdoutBytes += data.length;
+        try {
+          parsed.push(data);
+        } catch {
+          trace('malformed-output');
+        }
+      });
+      child.stdout.once('end', () => trace('stdout-end'));
+      child.stdout.once('close', () => trace('stdout-close'));
+      child.once('exit', (code, signal) => trace('exit', { code, signal }));
+      const request = client.request.bind(client);
+      client.request = async <T>(method: string, params?: unknown): Promise<T> => {
+        const at = Date.now();
+        const slow = method === 'initialize' ? setTimeout(() => void snapshot(), 5000) : undefined;
+        try {
+          const pending = request<T>(method, params);
+          if (method === 'initialize') {
+            trace('initialize-written', pipeState());
+            child.stdin.write('', error => trace('initialize-flushed', { failed: Boolean(error) }));
+          }
+          const result = await pending;
+          if (method === 'initialize') trace('initialized', { durationMs: Date.now() - at });
+          return result;
+        } catch (error) {
+          trace('request-failed', { method, durationMs: Date.now() - at, ...pipeState(), frames, stderr });
+          if (method === 'initialize' && error instanceof DeliveryError && error.message.includes('Timed out')) {
+            await snapshot();
+            // Keep the failed request failed; observe a late native error without resending it.
+            await new Promise(resolve => setTimeout(resolve, 10000));
+            trace('after-deadline', { ...pipeState(), frames, stderr });
+          }
+          throw error;
+        } finally {
+          clearTimeout(slow);
+        }
+      };
+    }
     clients.push(client);
     return client;
   };
@@ -82,6 +211,34 @@ async function main() {
       '---\nname: fixture\ndescription: Synthetic isolated integration fixture.\n---\nUse this synthetic fixture only.\n',
     );
     const executable = process.env.CODEX_RUNTIME_PATH || 'codex';
+    if (process.env.CODEX_STARTUP_CONCURRENT === '1') {
+      // Several editor surfaces can connect to the same native home at once.
+      let failed = 0;
+      for (const shared of [false, true]) {
+        const roots: string[] = [];
+        for (let i = 0; i < 8; i++) {
+          const workspace = join(temp, `workspace-${shared}-${i}`);
+          const codexHome = join(temp, `runtime-${shared}-${shared ? 0 : i}`);
+          await Promise.all([mkdir(workspace), mkdir(codexHome, { recursive: true })]);
+          contexts.set(workspace, { home: codexHome, label: '' });
+          roots.push(workspace);
+        }
+        for (const phase of ['cold', 'warm']) {
+          const label = `${shared ? 'shared' : 'separate'}-${phase}`;
+          for (const workspace of roots) contexts.set(workspace, { ...contexts.get(workspace)!, label });
+          const connections = await Promise.allSettled(
+            roots.map(workspace => connect(executable, workspace, {}, true)),
+          );
+          const failures = connections.filter(c => c.status === 'rejected');
+          console.log(
+            JSON.stringify({ scenario: label, passed: connections.length - failures.length, failed: failures.length }),
+          );
+          for (const c of connections) if (c.status === 'fulfilled') await c.value.client.shutdown();
+          failed += failures.length;
+        }
+      }
+      assert.equal(failed, 0, 'all cold/warm startup cases must succeed without retries');
+    }
     // The production writer: one configuration runtime shared by each write and its readback.
     const control = sharedConnection(() => connect(executable, root, {}, true));
     const writer = {
@@ -216,7 +373,7 @@ async function main() {
     assert.ok(httpLive.state.servers[0].tools.includes('echo_http'));
     assert.ok(httpCalls > 0);
     console.log(
-      'PASS: isolated Codex 0.152.0 Skills list/toggle/selection; MCP CAS CRUD, unknown-field preservation, ungranted probe/inventory/thread refusal, granted stdio and HTTP tool discovery. No auth copied and no model/tool calls.',
+      `PASS: isolated Codex ${runtime.version} Skills list/toggle/selection; MCP CAS CRUD, unknown-field preservation, ungranted probe/inventory/thread refusal, granted stdio and HTTP tool discovery. No auth copied and no model/tool calls.`,
     );
   } finally {
     RuntimeClient.spawn = original;

@@ -78,6 +78,7 @@ export class RuntimeClient extends EventEmitter {
     process.stderr.resume();
     process.stdin.on('error', () => this.fail('Runtime input pipe failed; outcome unknown'));
     process.stdout.on('error', () => this.fail('Runtime output pipe failed; outcome unknown'));
+    process.stdout.on('end', () => this.fail('Runtime output pipe closed; outcome unknown'));
     process.stderr.on('error', () => this.fail('Runtime diagnostic pipe failed; outcome unknown'));
     process.on('error', () => this.fail('Runtime process unavailable'));
     process.on('exit', () => this.fail('Runtime disconnected; reconcile history before sending again'));

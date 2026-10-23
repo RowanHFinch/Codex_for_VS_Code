@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Serialize app-server initialization within one extension host to avoid native
+  SQLite creation/migration races when multiple clients first open the same home.
+  Connected clients continue to run ordinary requests independently.
+- Treat a closed runtime output pipe as a disconnect immediately, preserving a
+  complete final response and refusing further sends instead of waiting for an RPC timeout.
+- Allow manual CI runs to select the Codex CLI version for native checks.
+- Capture bounded process/frame metadata in isolated native integration CI, and
+  provide a manual Windows startup reproduction workflow without request retries.
+
 ## 0.9.0
 
 First public release, consolidating local development versions.

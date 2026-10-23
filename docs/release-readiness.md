@@ -293,8 +293,8 @@ printed Node's `os.tmpdir()` before the fixtures ran.
 
 | Fixture temp folder | Run | Four-fixture pressure worker | Sequential + shared/separate worker |
 | --- | --- | --- | --- |
-| `C:\Users\RUNNER~1\AppData\Local\Temp` (default) | [39879557562](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39879557562) | **Failed:** 271 inits, p50 769 ms, max 3.2 s, 29 over 2 s; then the native state-runtime initialization error after 952 ms | Passed in 8 min: 205 inits, p50 443 ms, max 3.9 s, 23 over 2 s |
-| `D:\a\_temp` (`RUNNER_TEMP`) | [39879567810](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39879567810) | Passed: 900 inits (all 25 batches), p50 395 ms, max 1.4 s, **0 over 2 s** | Passed in 2 min: 205 inits, p50 56 ms, max 0.85 s, **0 over 2 s** |
+| Default `%TEMP%` on `C:` | [39879557562](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39879557562) | **Failed:** 271 inits, p50 769 ms, max 3.2 s, 29 over 2 s; then the native state-runtime initialization error after 952 ms | Passed in 8 min: 205 inits, p50 443 ms, max 3.9 s, 23 over 2 s |
+| `RUNNER_TEMP` on `D:` | [39879567810](https://github.com/RowanHFinch/Codex_for_VS_Code/actions/runs/39879567810) | Passed: 900 inits (all 25 batches), p50 395 ms, max 1.4 s, **0 over 2 s** | Passed in 2 min: 205 inits, p50 56 ms, max 0.85 s, **0 over 2 s** |
 
 Across all earlier Windows diagnostics, every run used the default `C:` temp
 folder and showed multi-second cold starts; this is the first configuration with
@@ -313,5 +313,9 @@ strongest supported explanation rather than a reconstruction of that event.
 
 Users whose Codex home is on a similarly slow disk could also see a first start
 exceed 30 seconds; the extension still reports that as an unknown outcome and
-does not retry. Regular CI has **not** yet been changed to use `RUNNER_TEMP`.
-Merge and publication remain blocked.
+does not retry.
+
+Regular CI now sets `TEMP`/`TMP` to `RUNNER_TEMP` in the Windows editor job
+before the native and editor checks, so empty test homes are created on `D:`.
+The 30-second RPC deadline, failure assertions and no-retry behavior are
+unchanged. Merge and publication remain blocked.

@@ -16,6 +16,10 @@ on:
         type: boolean
         default: false
         description: Exclude the runner temp folder from Defender scanning during startup diagnostics
+      temp_on_runner_temp:
+        type: boolean
+        default: false
+        description: Place startup diagnostic fixtures under RUNNER_TEMP instead of the default temp folder
 permissions:
   contents: read
 jobs:
@@ -107,6 +111,13 @@ jobs:
             Add-MpPreference -ExclusionPath $temp
           }
           Write-Output "DEFENDER EXCLUSIONS: $((Get-MpPreference).ExclusionPath -join ';')"
+      - if: ${{ inputs.temp_on_runner_temp }}
+        name: Move fixture temp folder to RUNNER_TEMP
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+      - name: Record fixture temp folder
+        run: node -p "require('os').tmpdir()"
       - name: Reproduce native startup without retries
         run: |
           foreach ($check in @('test:oauth', 'test:elicitation', 'test:agents')) {

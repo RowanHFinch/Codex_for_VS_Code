@@ -23,7 +23,8 @@ test('malformed and oversized runtime input fails closed', () => {
     assert.throws(() => new JsonLines(() => {}).push(Buffer.from(line)));
   assert.throws(() => new JsonLines(() => {}, 20).push(Buffer.alloc(21, 'x')));
 });
-function runtime(timeout = 500) {
+// Identity/stream tests must allow child-process startup under a busy test runner.
+function runtime(timeout = 5000) {
   return new RuntimeClient(
     spawn(process.execPath, ['tests/fixtures/runtime.cjs'], { stdio: ['pipe', 'pipe', 'pipe'] }),
     timeout,

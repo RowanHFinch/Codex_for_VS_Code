@@ -354,3 +354,12 @@ Remaining risks and limits:
   printed. It did not occur on `D:` or in regular CI.
 - Initialization serialization covers one extension host only, not other VS Code
   windows, CLI or desktop clients.
+
+## 0.9.1 patch scope
+
+PR #1 is merged. Version 0.9.1 includes the verified stdout-disconnect and
+single-extension-host startup-serialization fixes above, plus the Windows CI
+temporary-directory adjustment. It does not claim to eliminate every Windows
+cold-start timeout or coordinate initialization across external clients.
+Final-package verification and distribution evidence are recorded with the
+GitHub 0.9.1 release. Historical 0.9.0 acceptance remains scoped to that version.

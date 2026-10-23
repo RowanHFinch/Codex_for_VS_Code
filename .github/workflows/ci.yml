@@ -49,7 +49,7 @@ jobs:
   editor:
     if: ${{ !inputs.startup_diagnostics }}
     env:
-      CODEX_TEST_VSIX: dist/codex-for-vscode-0.9.0.vsix
+      CODEX_TEST_VSIX: dist/codex-for-vscode-0.9.1.vsix
     strategy:
       fail-fast: false
       matrix:

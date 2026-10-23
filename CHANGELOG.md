@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.1
 
 - Serialize app-server initialization within one extension host to avoid native
   SQLite creation/migration races when multiple clients first open the same home.
@@ -10,6 +10,9 @@
 - Allow manual CI runs to select the Codex CLI version for native checks.
 - Capture bounded process/frame metadata in isolated native integration CI, and
   provide a manual Windows startup reproduction workflow without request retries.
+
+Known limitation: a first startup on a slow disk can still exceed the 30-second
+initialization deadline. Unknown requests are never automatically retried.
 
 ## 0.9.0
 

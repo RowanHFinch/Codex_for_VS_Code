@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 npm run release:local
-export CODEX_TEST_VSIX=dist/codex-for-vscode-0.9.0.vsix
+export CODEX_TEST_VSIX=dist/codex-for-vscode-0.9.1.vsix
 npm run test:oauth
 npm run test:elicitation
 npm run test:agents

@@ -64,6 +64,12 @@ jobs:
       - run: npm ci
       - run: npm run release:local
       - run: npm install --global @openai/codex@${{ inputs.runtime_version || '0.152.0' }}
+      # The default Windows temp folder is on the slow C: OS volume; native cold starts
+      # creating SQLite state there exceeded the 30-second initialize deadline.
+      - if: runner.os == 'Windows'
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - run: npm run test:oauth
       - run: npm run test:elicitation
       - run: npm run test:agents

@@ -8,6 +8,7 @@ import { RuntimeClient } from '../src/runtime/client';
 import { Coordinator } from '../src/sessions/coordinator';
 import { runtimeSettings } from '../src/runtime/settings';
 import { runtimeExecutable } from '../src/runtime/executable';
+import type { ThreadReadResponse } from '../src/protocol/v2/ThreadReadResponse';
 
 async function main() {
   const temp = await realpath(await mkdtemp(join(tmpdir(), 'ic-forms-'))),
@@ -188,6 +189,19 @@ async function main() {
         action === 'accept' ? { label: 'SYNTHETIC_FORM', count: 0, confirmed: false } : undefined,
       );
       await until(() => coordinator!.state.status === 'completed', 'Native tool did not resume after MCP ' + action);
+      // A completion notification is not a persistence barrier; flush/read this one-turn fixture before export.
+      const persisted: ThreadReadResponse = await client.request<ThreadReadResponse>('thread/read', {
+        threadId: coordinator.state.threadId!,
+        includeTurns: true,
+      });
+      assert.equal(persisted.thread.turns.length, 1);
+      assert.equal(persisted.thread.turns[0].status, 'completed');
+      assert.ok(
+        persisted.thread.turns[0].items.some(
+          item => item.type === 'agentMessage' && item.text.includes('SYNTHETIC_FORM_' + action.toUpperCase()),
+        ),
+        'Completed MCP result was not persisted in native history',
+      );
       const exported = await coordinator.exportConversation(coordinator.state.threadId!);
       assert.ok(exported.includes('SYNTHETIC_FORM_' + action.toUpperCase()));
       assert.ok(exported.includes('Run the synthetic collect tool.'));
@@ -219,7 +233,8 @@ async function main() {
     await client?.shutdown();
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
-    await rm(temp, { recursive: true, force: true });
+    // Windows may retain child-process directory handles briefly after shutdown.
+    await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 void main().catch(error => {
